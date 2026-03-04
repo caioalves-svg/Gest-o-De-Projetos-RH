@@ -3,19 +3,13 @@ import streamlit as st
 def aplicar_estilo_corporativo():
     st.markdown("""
         <style>
-            /* Esconde APENAS os três pontinhos padrão e o rodapé */
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
+            /* 1. OCULTA APENAS O MENU DIREITO (Deploy/Três Pontinhos) E O RODAPÉ */
+            [data-testid="stToolbar"] {visibility: hidden !important;}
+            footer {visibility: hidden !important;}
             
-            /* ========================================================
-               A CORREÇÃO ABSOLUTA: FORÇA O BOTÃO DE MENU A APARECER 
-               ======================================================== */
-            [data-testid="collapsedControl"] {
-                display: flex !important;
-                visibility: visible !important;
-                z-index: 999999 !important;
-                background-color: #F8FAFC !important;
-                border-radius: 50% !important;
+            /* 2. DEIXA A BARRA SUPERIOR TRANSPARENTE (Assim a setinha funciona perfeitamente) */
+            header {
+                background-color: transparent !important;
             }
 
             /* Fundo geral mais suave para destacar os cartões brancos */
