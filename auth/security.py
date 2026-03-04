@@ -1,7 +1,6 @@
 import bcrypt
 import sqlite3
 import streamlit as st
-import os
 
 DB_PATH = "rh_projects.db"
 
@@ -24,3 +23,8 @@ def login(username, password):
         st.session_state['can_edit_tasks'] = bool(user[5])
         return True
     return False
+
+# Adicionada para resolver o ImportError
+def check_auth():
+    if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+        st.stop()
