@@ -1,76 +1,80 @@
 import streamlit as st
 
-# REGRA DE OURO: Deve ser a primeira linha do arquivo
-st.set_page_config(page_title="Sistema RH", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+# REGRA DE OURO DO STREAMLIT: DEVE SER A LINHA 1
+st.set_page_config(page_title="Gestão de Projetos RH", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 import sqlite3
-import pandas as pd
-from datetime import datetime
-from database.setup import init_db, DB_PATH
+from database.setup import init_db
 from auth.security import login
-from utils.layout import aplicar_estilo_corporativo
-from services.kpi_service import obter_metricas_gerais_sla, calcular_sla_projeto
+from utils.layout import aplicar_css_seguro, renderizar_menu_lateral
 
-# Inicialização
+# Inicializa o Banco de Dados
 init_db()
 
+# Inicializa as Variáveis de Estado
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-if 'pagina_ativa' not in st.session_state:
-    st.session_state['pagina_ativa'] = "home"
+if 'tela_atual' not in st.session_state:
+    st.session_state['tela_atual'] = 'home'
 
-# --- FLUXO DE ACESSO ---
+# Aplica o visual independentemente da tela
+aplicar_css_seguro()
+
+# ==========================================
+# MÓDULO DE LOGIN
+# ==========================================
 if not st.session_state['logged_in']:
-    col_l, col_c, col_r = st.columns([1, 1.2, 1])
-    with col_c:
-        st.markdown("<br><br><h2>⚡ Gestão de Projetos RH</h2>", unsafe_allow_html=True)
-        with st.form("login_direct"):
-            u = st.text_input("Usuário")
-            p = st.text_input("Senha", type="password")
-            if st.form_submit_button("Entrar no Workspace", use_container_width=True):
-                if login(u, p):
-                    st.session_state['pagina_ativa'] = "home"
-                    st.rerun()
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>⚡ Sistema de Projetos RH</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #64748B;'>Acesso restrito. Insira suas credenciais.</p>", unsafe_allow_html=True)
+        
+        with st.form("form_login_principal"):
+            username = st.text_input("Usuário")
+            password = st.text_input("Senha", type="password")
+            
+            if st.form_submit_button("Entrar no Sistema", use_container_width=True):
+                if login(username, password):
+                    st.rerun() # Recarrega a página para entrar no sistema
                 else:
-                    st.error("Credenciais inválidas")
+                    st.error("❌ Usuário ou senha incorretos.")
+
+# ==========================================
+# MÓDULO DO SISTEMA LOGADO (SPA)
+# ==========================================
 else:
-    # SISTEMA LOGADO
-    aplicar_estilo_corporativo()
-    pagina = st.session_state['pagina_ativa']
+    # 1. Desenha o Menu Lateral Seguro
+    renderizar_menu_lateral()
 
-    # 1. PÁGINA: HOME
-    if pagina == "home":
-        st.title("🏠 Bem-vindo ao Painel de Controle")
-        st.write("Selecione uma opção no menu lateral para começar a trabalhar.")
-        st.info("Dica: A navegação agora é instantânea e não recarrega a página.")
+    # 2. Roteador de Telas Instantâneo
+    tela = st.session_state['tela_atual']
 
-    # 2. PÁGINA: DASHBOARD (ADMIN APENAS)
-    elif pagina == "dashboard":
-        st.title("📊 Dashboard Executivo")
-        slas = obter_metricas_gerais_sla()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Lead Time Médio", f"{slas['avg_lead_time']} dias")
-        c2.metric("SLA de Resposta", f"{slas['avg_first_response']}h")
-        st.divider()
-        st.write("Estatísticas detalhadas em carregamento...")
+    if tela == 'home':
+        st.title("🏠 Bem-vindo ao seu Workspace")
+        st.markdown("---")
+        st.success("✅ O sistema está online e atualizado. Utilize o menu à esquerda para navegar pelas ferramentas de forma instantânea.")
 
-    # 3. PÁGINA: WORKSPACE DE PROJETOS
-    elif pagina == "projetos":
+    elif tela == 'projetos':
         st.title("🏢 Workspace de Projetos")
-        # Aqui você insere o código completo que estava no pages/2_Projetos.py
-        # Sem o set_page_config e sem o aplicar_estilo_corporativo (já estão no topo)
-        st.write("Listagem de projetos ativos...")
+        st.info("Aqui entrará o seu Kanban. (Código estruturado sem atrasos)")
+        # Todo o código da página de Projetos virá para cá depois
 
-    # 4. PÁGINA: NOVO PROJETO
-    elif pagina == "novo":
+    elif tela == 'novo_projeto':
         st.title("🚀 Iniciar Novo Projeto")
-        with st.form("new_proj"):
-            n = st.text_input("Nome do Projeto")
-            t = st.selectbox("Tipo", ["Melhoria", "Implantação"])
-            if st.form_submit_button("Lançar Projeto"):
-                st.success("Projeto criado!")
+        if st.session_state.get('role') != 'admin':
+            st.error("🔒 Acesso negado.")
+        else:
+            with st.form("form_novo"):
+                n = st.text_input("Nome do Projeto")
+                t = st.selectbox("Tipo", ["Melhoria", "Implantação"])
+                if st.form_submit_button("Criar Iniciativa"):
+                    st.success("A lógica de inserção vem aqui.")
 
-    # 5. PÁGINA: CONFIGURAÇÕES
-    elif pagina == "config":
+    elif tela == 'dashboard':
+        st.title("📊 Dashboard Executivo")
+        st.metric("Exemplo de Métrica", "100%")
+
+    elif tela == 'configuracoes':
         st.title("⚙️ Configurações e Acessos")
-        st.write("Gerenciamento de usuários...")
+        st.write("Gestão de usuários.")
