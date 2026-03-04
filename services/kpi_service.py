@@ -11,102 +11,87 @@ from database.setup import DB_PATH
 def _get_connection():
     return sqlite3.connect(DB_PATH)
 
-def calcular_lead_time_projeto(project_id):
+def calcular_sla_resposta_tarefa(task_id):
     """
-    SLA 3: Tempo total até resolução.
-    Calcula a diferença em dias entre a start_date e a real_end_date.
-    """
-    conn = _get_connection()
-    query = "SELECT start_date, real_end_date, status FROM projects WHERE id = ?"
-    df = pd.read_sql_query(query, conn, params=(project_id,))
-    conn.close()
-
-    if df.empty or df['status'].iloc[0] != 'Concluído' or pd.isna(df['real_end_date'].iloc[0]):
-        return None # Apenas calculamos Lead Time de projetos concluídos
-
-    start = pd.to_datetime(df['start_date'].iloc[0])
-    end = pd.to_datetime(df['real_end_date'].iloc[0])
-    
-    lead_time_days = (end - start).days
-    return max(0, lead_time_days) # Evita valores negativos se as datas estiverem invertidas por erro humano
-
-def calcular_tempo_primeira_resposta(project_id):
-    """
-    SLA 1: Tempo para a primeira resposta.
-    Diferença entre a data de início do projeto e o primeiro comentário registado.
+    Novo SLA: Tempo para a primeira resposta do Dono da Tarefa no Chat.
+    Calcula a diferença em horas entre a 1ª mensagem de terceiros e a resposta do dono.
     """
     conn = _get_connection()
     
-    # Obter data de início do projeto
-    query_proj = "SELECT start_date FROM projects WHERE id = ?"
-    df_proj = pd.read_sql_query(query_proj, conn, params=(project_id,))
+    # 1. Obter quem é o responsável (Assignee) da tarefa
+    query_task = "SELECT assignee_id FROM tasks WHERE id = ?"
+    df_task = pd.read_sql_query(query_task, conn, params=(task_id,))
     
-    # Obter o primeiro comentário
-    query_com = "SELECT created_at FROM comments WHERE project_id = ? ORDER BY created_at ASC LIMIT 1"
-    df_com = pd.read_sql_query(query_com, conn, params=(project_id,))
+    if df_task.empty or pd.isna(df_task['assignee_id'].iloc[0]):
+        conn.close()
+        return None # Se a tarefa não tem dono, não há SLA a medir
+        
+    assignee_id = df_task['assignee_id'].iloc[0]
+    
+    # 2. Obter todo o histórico do chat em ordem cronológica
+    query_chat = "SELECT user_id, created_at FROM task_chats WHERE task_id = ? ORDER BY created_at ASC"
+    df_chat = pd.read_sql_query(query_chat, conn, params=(task_id,))
     conn.close()
 
-    if df_proj.empty or df_com.empty or pd.isna(df_proj['start_date'].iloc[0]):
-        return None # Sem resposta ainda ou sem data de início
+    if df_chat.empty:
+        return None
 
-    # Assumimos que o projeto começou às 08:00 da data de início para ter uma base de cálculo de horas
-    start_date_str = f"{df_proj['start_date'].iloc[0]} 08:00:00"
-    start_dt = pd.to_datetime(start_date_str)
-    first_reply_dt = pd.to_datetime(df_com['created_at'].iloc[0])
+    # Converter para o tipo datetime do Pandas para contas matemáticas
+    df_chat['created_at'] = pd.to_datetime(df_chat['created_at'])
 
-    diff_hours = (first_reply_dt - start_dt).total_seconds() / 3600.0
-    return max(0, round(diff_hours, 1))
-
-def calcular_tempo_entre_interacoes(project_id):
-    """
-    SLA 2: Tempo médio entre interações.
-    Calcula a média de tempo (em horas) entre comentários consecutivos num projeto.
-    """
-    conn = _get_connection()
-    query = "SELECT created_at FROM comments WHERE project_id = ? ORDER BY created_at ASC"
-    df = pd.read_sql_query(query, conn, params=(project_id,))
-    conn.close()
-
-    if len(df) < 2:
-        return None # É preciso pelo menos 2 comentários para haver intervalo
-
-    df['created_at'] = pd.to_datetime(df['created_at'])
-    
-    # A magia do Pandas: .diff() calcula a diferença entre a linha atual e a anterior
-    df['diff'] = df['created_at'].diff()
-    
-    # Calcular a média dessas diferenças em horas
-    media_segundos = df['diff'].mean().total_seconds()
-    media_horas = media_segundos / 3600.0
-    
-    return round(media_horas, 1)
+    # 3. Lógica de detecção de resposta
+    for idx, row in df_chat.iterrows():
+        # Encontra a primeira mensagem que NÃO é do dono da tarefa (uma cobrança/pergunta)
+        if row['user_id'] != assignee_id:
+            hora_pergunta = row['created_at']
+            
+            # Corta o dataframe para olhar apenas as mensagens DEPOIS dessa pergunta
+            df_subsequente = df_chat.iloc[idx+1:]
+            
+            # Filtra para achar as mensagens que SÃO do dono da tarefa
+            respostas_dono = df_subsequente[df_subsequente['user_id'] == assignee_id]
+            
+            if not respostas_dono.empty:
+                # Pega a exata hora da primeira resposta que ele deu
+                hora_resposta = respostas_dono.iloc[0]['created_at']
+                
+                # Calcula a diferença em horas
+                diff_horas = (hora_resposta - hora_pergunta).total_seconds() / 3600.0
+                return max(0, round(diff_horas, 1))
+            else:
+                return None # O terceiro mandou mensagem, mas o dono ainda não respondeu!
+                
+    return None # Só tem mensagens do próprio dono (ele falando sozinho)
 
 def obter_metricas_gerais_sla():
     """
-    Agrega os SLAs de todos os projetos para alimentar o Dashboard Executivo.
+    Agrega as novas métricas de SLA e Lead Time para o Dashboard Principal.
     """
     conn = _get_connection()
-    df_projects = pd.read_sql_query("SELECT id FROM projects", conn)
+    df_tasks = pd.read_sql_query("SELECT id FROM tasks", conn)
+    df_projects = pd.read_sql_query("SELECT id, start_date, real_end_date, status FROM projects", conn)
     conn.close()
 
-    if df_projects.empty:
-        return {"avg_lead_time": 0, "avg_first_response": 0, "avg_interaction_time": 0}
+    # 1. Média do tempo de resposta do Chat (Todas as tarefas)
+    slas_resposta = []
+    for tid in df_tasks['id']:
+        sla = calcular_sla_resposta_tarefa(tid)
+        if sla is not None:
+            slas_resposta.append(sla)
+            
+    avg_first_response = round(sum(slas_resposta) / len(slas_resposta), 1) if slas_resposta else 0.0
 
-    lead_times = []
-    first_responses = []
-    interaction_times = []
-
-    for pid in df_projects['id']:
-        lt = calcular_lead_time_projeto(pid)
-        fr = calcular_tempo_primeira_resposta(pid)
-        it = calcular_tempo_entre_interacoes(pid)
-
-        if lt is not None: lead_times.append(lt)
-        if fr is not None: first_responses.append(fr)
-        if it is not None: interaction_times.append(it)
+    # 2. Média do Lead Time Geral (Apenas projetos concluídos)
+    df_concluidos = df_projects[df_projects['status'] == 'Concluído'].copy()
+    if not df_concluidos.empty:
+        df_concluidos['start_date'] = pd.to_datetime(df_concluidos['start_date'], errors='coerce')
+        df_concluidos['real_end_date'] = pd.to_datetime(df_concluidos['real_end_date'], errors='coerce')
+        df_concluidos['lead_time'] = (df_concluidos['real_end_date'] - df_concluidos['start_date']).dt.days
+        avg_lead_time = round(df_concluidos['lead_time'].mean(), 1)
+    else:
+        avg_lead_time = 0.0
 
     return {
-        "avg_lead_time": round(sum(lead_times) / len(lead_times), 1) if lead_times else 0,
-        "avg_first_response": round(sum(first_responses) / len(first_responses), 1) if first_responses else 0,
-        "avg_interaction_time": round(sum(interaction_times) / len(interaction_times), 1) if interaction_times else 0
+        "avg_lead_time": max(0, avg_lead_time),
+        "avg_first_response": avg_first_response
     }
