@@ -15,23 +15,12 @@ check_auth()
 
 st.set_page_config(page_title="Workspace de Projetos", page_icon="🏢", layout="wide")
 
-# CSS CUSTOMIZADO
 st.markdown("""
 <style>
-    .kanban-card {
-        background-color: #ffffff;
-        border-left: 4px solid #3498DB;
-        padding: 15px;
-        border-radius: 6px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin-bottom: 12px;
-    }
+    .kanban-card { background-color: #ffffff; border-left: 4px solid #3498DB; padding: 15px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 12px; }
     .kanban-card-done { border-left-color: #2ECC71; }
     .kanban-card-doing { border-left-color: #F39C12; }
-    .kanban-col-header {
-        font-weight: 600; font-size: 1.1em; padding: 10px;
-        background-color: #f8f9fa; border-radius: 6px; text-align: center; margin-bottom: 15px;
-    }
+    .kanban-col-header { font-weight: 600; font-size: 1.1em; padding: 10px; background-color: #f8f9fa; border-radius: 6px; text-align: center; margin-bottom: 15px; }
     .chat-bubble-me { background-color: #DCF8C6; padding: 10px; border-radius: 10px 10px 0px 10px; margin: 5px 0; text-align: right; }
     .chat-bubble-other { background-color: #F1F0F0; padding: 10px; border-radius: 10px 10px 10px 0px; margin: 5px 0; text-align: left; }
     .chat-meta { font-size: 0.8em; color: #666; }
@@ -46,6 +35,7 @@ if 'selected_project_id' not in st.session_state:
 
 def go_back_to_portfolio():
     st.session_state['selected_project_id'] = None
+    st.session_state['confirm_delete'] = False
 
 # FUNÇÕES DE BANCO DE DADOS
 def get_projects():
@@ -89,6 +79,21 @@ def send_chat_message(task_id, message, file_path=None):
     conn.commit()
     conn.close()
 
+def delete_project_full(project_id):
+    """Deleta o projeto e todo o seu histórico (Tarefas, Chats e Escopo)"""
+    conn = sqlite3.connect(DB_PATH)
+    # Deleta os chats das tarefas deste projeto
+    conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (project_id,))
+    # Deleta as tarefas
+    conn.execute("DELETE FROM tasks WHERE project_id = ?", (project_id,))
+    # Deleta o escopo
+    conn.execute("DELETE FROM project_melhoria WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM project_implantacao WHERE project_id = ?", (project_id,))
+    # Deleta o projeto
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
 # ==========================================
 # VISÃO 1: PORTFÓLIO
 # ==========================================
@@ -105,7 +110,7 @@ if st.session_state['selected_project_id'] is None:
                 with st.container(border=True):
                     st.markdown(f"### {row['code']}")
                     st.markdown(f"**{row['name']}**")
-                    st.caption(f"Status do Projeto: **{row['status']}**")
+                    st.caption(f"Status: **{row['status']}**")
                     
                     if st.button("Abrir Projeto ➔", key=f"open_{row['id']}", use_container_width=True):
                         st.session_state['selected_project_id'] = row['id']
@@ -119,7 +124,6 @@ else:
     p_data = st.session_state['selected_project_data']
     p_id = p_data['id']
     
-    # Cabeçalho do Projeto com Atualização de Status
     col_back, col_title, col_status = st.columns([1, 6, 3])
     with col_back:
         if st.button("⬅ Voltar"):
@@ -131,8 +135,17 @@ else:
         st.caption(f"Início: {p_data['start_date']} | Prazo: {p_data['due_date']}")
 
     with col_status:
-        # AQUI ESTÁ A ATUALIZAÇÃO DO STATUS DO PROJETO
-        status_options = ["Aguardando Início", "Em Andamento", "Aguardando Aprovação Orçamentária", "Parado", "Concluído", "Cancelado"]
+        # STATUS DE MERCADO APLICADOS AQUI
+        status_options = [
+            "Não Iniciado", 
+            "Em Planejamento", 
+            "Em Execução", 
+            "Aguardando Aprovação", 
+            "Pausado / Bloqueado", 
+            "Concluído", 
+            "Cancelado"
+        ]
+        
         current_status = p_data['status']
         if current_status not in status_options:
             status_options.append(current_status)
@@ -142,21 +155,35 @@ else:
         if new_proj_status != current_status:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("UPDATE projects SET status = ? WHERE id = ?", (new_proj_status, p_id))
-            
-            # Se marcou como concluído, grava a data real para o SLA não quebrar
             if new_proj_status == "Concluído":
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 conn.execute("UPDATE projects SET real_end_date = ? WHERE id = ?", (hoje, p_id))
-                
             conn.commit()
             conn.close()
             st.session_state['selected_project_data']['status'] = new_proj_status
             st.success("Status atualizado!")
             st.rerun()
 
+    # ZONA DE PERIGO: EXCLUSÃO DE PROJETO (Apenas Admin)
+    if user_role == 'admin':
+        if st.button("🗑️ Excluir Projeto", type="secondary"):
+            st.session_state['confirm_delete'] = True
+            
+        if st.session_state.get('confirm_delete', False):
+            st.warning("⚠️ Tem certeza que deseja excluir este projeto? Esta ação apagará todas as tarefas e conversas permanentemente.")
+            col_y, col_n = st.columns(2)
+            if col_y.button("✅ Sim, Excluir Definitivamente"):
+                delete_project_full(p_id)
+                st.success("Projeto excluído com sucesso!")
+                go_back_to_portfolio()
+                st.rerun()
+            if col_n.button("❌ Cancelar"):
+                st.session_state['confirm_delete'] = False
+                st.rerun()
+
     st.divider()
 
-    # ABAS (Kanban e Visão Geral continuam iguais)
+    # ABAS
     tab_kanban, tab_overview = st.tabs(["🗂️ Kanban & Chat das Tarefas", "📊 Visão Geral do Escopo"])
 
     # ABA 1: KANBAN
