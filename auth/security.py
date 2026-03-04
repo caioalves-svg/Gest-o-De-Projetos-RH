@@ -1,6 +1,10 @@
 import bcrypt
 import sqlite3
 import streamlit as st
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
 
 def verify_password(plain_password, hashed_password):
@@ -9,7 +13,8 @@ def verify_password(plain_password, hashed_password):
 def login(username, password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, password_hash, name, role FROM users WHERE username = ?", (username,))
+    # Puxa também a coluna can_edit_tasks
+    cursor.execute("SELECT id, username, password_hash, name, role, can_edit_tasks FROM users WHERE username = ?", (username,))
     user = cursor.fetchone()
     conn.close()
 
@@ -19,6 +24,7 @@ def login(username, password):
         st.session_state['username'] = user[1]
         st.session_state['name'] = user[3]
         st.session_state['role'] = user[4]
+        st.session_state['can_edit_tasks'] = bool(user[5]) # Salva a permissão na sessão
         return True
     return False
 
