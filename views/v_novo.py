@@ -9,13 +9,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
 
 def render():
-    st.title("🚀 Iniciar Novo Projeto")
+    st.title("➕ Iniciar Novo Projeto")
+    st.markdown("<p style='color: #64748B;'>Registe uma nova iniciativa estratégica no portfólio.</p>", unsafe_allow_html=True)
+    st.markdown("---")
     
     if st.session_state.get('role') != 'admin':
         st.error("🔒 Acesso restrito a administradores.")
         return
 
-    # Busca os usuários para o selectbox
     conn = sqlite3.connect(DB_PATH)
     users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
     conn.close()
@@ -43,26 +44,25 @@ def render():
             just = st.text_area("Justificativa da Implantação")
             risk = st.text_area("Principais Riscos")
 
-        if st.form_submit_button("Lançar no Portfólio"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.form_submit_button("🚀 Lançar Projeto no Portfólio"):
             if nome and req:
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
                 cur.execute("SELECT COUNT(*) FROM projects")
                 code = f"HR-{cur.fetchone()[0] + 1:03d}"
                 
-                # Inserir Projeto Base
                 cur.execute("""INSERT INTO projects (code, name, requester, sponsor, manager_id, type, due_date, status, start_date) 
                                VALUES (?,?,?,?,?,?,?,?,?)""", 
                             (code, nome, req, sponsor, manager, tipo, due_date, 'Não Iniciado', datetime.now().strftime('%Y-%m-%d')))
                 proj_id = cur.lastrowid
                 
-                # Inserir Detalhes Específicos
                 if tipo == "Melhoria":
                     cur.execute("INSERT INTO project_melhoria (project_id, as_is, to_be) VALUES (?,?,?)", (proj_id, as_is, to_be))
                 else:
                     cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, just, risk))
                 
                 conn.commit(); conn.close()
-                st.success(f"Projeto {code} criado com sucesso! Ele já está disponível no Workspace.")
+                st.success(f"✅ Projeto {code} criado com sucesso! Já está disponível no Workspace.")
             else:
-                st.error("Preencha os campos obrigatórios (Nome e Área Solicitante).")
+                st.error("⚠️ Preencha os campos obrigatórios (*).")
