@@ -4,14 +4,12 @@ import pandas as pd
 import bcrypt
 import os
 import sys
-import time  # Importante para a pausa da mensagem de sucesso
+import time
 
-# Ajuste de path para importações
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
 from auth.security import check_auth
 
-# Verificação de Segurança
 check_auth()
 
 if st.session_state.get('role') != 'admin':
@@ -25,25 +23,20 @@ st.subheader("👥 Gestão de Usuários (Admin / Colaboradores)")
 
 tab_list, tab_create = st.tabs(["📋 Lista de Usuários", "➕ Cadastrar Novo Usuário"])
 
-# ABA 1: LISTAGEM
 with tab_list:
     conn = sqlite3.connect(DB_PATH)
-    df_users = pd.read_sql_query("SELECT id, name, username, role FROM users", conn)
+    # Mostra a coluna de permissão na tabela
+    df_users = pd.read_sql_query("SELECT id, name, username, role, can_edit_tasks FROM users", conn)
     conn.close()
+    
+    df_users['can_edit_tasks'] = df_users['can_edit_tasks'].apply(lambda x: "Sim" if x else "Não")
     
     st.dataframe(
         df_users, 
-        column_config={
-            "id": "ID",
-            "name": "Nome Completo",
-            "username": "Login",
-            "role": "Perfil de Acesso"
-        },
-        hide_index=True,
-        use_container_width=True
+        column_config={"id": "ID", "name": "Nome", "username": "Login", "role": "Perfil", "can_edit_tasks": "Pode Editar Tarefas?"},
+        hide_index=True, use_container_width=True
     )
 
-# ABA 2: CRIAÇÃO
 with tab_create:
     with st.container(border=True):
         with st.form("new_user_form", clear_on_submit=True):
@@ -55,6 +48,9 @@ with tab_create:
             new_password = col3.text_input("Senha*", type="password")
             new_role = col4.selectbox("Perfil de Acesso*", ["colaborador", "admin"])
             
+            # A NOVA PERMISSÃO AQUI
+            can_edit = st.checkbox("🔑 Conceder permissão para Editar Tarefas (Título, Prazo, Responsável)")
+            
             st.markdown("<br>", unsafe_allow_html=True)
             submit_user = st.form_submit_button("Criar Usuário", type="primary")
             
@@ -63,22 +59,20 @@ with tab_create:
                     st.error("Preencha todos os campos obrigatórios.")
                 else:
                     try:
-                        # Gerar Hash da nova senha
                         hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                        is_admin_edit = 1 if new_role == 'admin' else (1 if can_edit else 0)
                         
                         conn = sqlite3.connect(DB_PATH)
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "INSERT INTO users (username, password_hash, name, role) VALUES (?, ?, ?, ?)",
-                            (new_username, hashed_pw, new_name, new_role)
+                        conn.execute(
+                            "INSERT INTO users (username, password_hash, name, role, can_edit_tasks) VALUES (?, ?, ?, ?, ?)",
+                            (new_username, hashed_pw, new_name, new_role, is_admin_edit)
                         )
                         conn.commit()
                         conn.close()
                         
-                        # Mensagem exata solicitada e pausa para leitura
                         st.success("Usuário criado com sucesso!")
-                        time.sleep(1.5)  # Congela a tela por 1.5 segundos para o usuário ler a mensagem
-                        st.rerun()       # Recarrega para limpar o form e atualizar a lista
+                        time.sleep(1.5)
+                        st.rerun()
                         
                     except sqlite3.IntegrityError:
-                        st.error("Erro: Este Nome de Usuário (Login) já existe. Escolha outro.")
+                        st.error("Erro: Este Login já existe.")
