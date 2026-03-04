@@ -17,14 +17,12 @@ def login(username, password):
     if user and verify_password(password, user[2]):
         st.session_state['logged_in'] = True
         st.session_state['user_id'] = user[0]
-        st.session_state['username'] = user[1]
         st.session_state['name'] = user[3]
         st.session_state['role'] = user[4]
         st.session_state['can_edit_tasks'] = bool(user[5])
         return True
     return False
 
-# Adicionada para resolver o ImportError
 def check_auth():
-    if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+    if not st.session_state.get('logged_in'):
         st.stop()
