@@ -43,10 +43,10 @@ df_projects['due_date'] = pd.to_datetime(df_projects['due_date'], errors='coerce
 df_projects['real_end_date'] = pd.to_datetime(df_projects['real_end_date'], errors='coerce')
 df_projects['start_date'] = pd.to_datetime(df_projects['start_date'], errors='coerce')
 
-# Cálculos Base
+# Cálculos Baseados nos Novos Status de Mercado
 projetos_concluidos = df_projects[df_projects['status'] == 'Concluído']
-projetos_parados = df_projects[df_projects['status'].isin(['Parado', 'Aguardando Aprovação Orçamentária'])]
-projetos_andamento = df_projects[df_projects['status'] == 'Em Andamento']
+projetos_pendentes = df_projects[df_projects['status'].isin(['Não Iniciado', 'Em Planejamento', 'Em Execução', 'Aguardando Aprovação'])]
+projetos_parados = df_projects[df_projects['status'] == 'Pausado / Bloqueado']
 
 # KPI Principal
 if not projetos_concluidos.empty:
@@ -58,23 +58,26 @@ else:
 slas = obter_metricas_gerais_sla()
 
 # ==========================================
-# MÉTRICAS
+# MÉTRICAS DE EXECUÇÃO
 # ==========================================
-st.markdown("### 🎯 Visão do Portfólio")
+st.markdown("### 🎯 Visão Executiva do Portfólio")
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Projetos Totais", len(df_projects))
+col1.metric("Projetos Totais (Cadastrados)", len(df_projects))
 col2.metric("🏆 % Entregue no Prazo", f"{kpi_prazo_pct:.1f}%")
-col3.metric("⏳ Em Andamento", len(projetos_andamento))
-col4.metric("🛑 Parados / Aguardando", len(projetos_parados))
+col3.metric("⏳ Em Andamento (Ativos)", len(projetos_pendentes))
+col4.metric("🛑 Pausados / Bloqueados", len(projetos_parados))
 
 st.divider()
 
-st.markdown("### ⏱️ SLAs de Operação")
+# ==========================================
+# MÉTRICAS DE SLA E CAPACIDADE
+# ==========================================
+st.markdown("### ⏱️ Acordos de Nível de Serviço (SLA)")
 col_sla1, col_sla2, col_sla3 = st.columns(3)
 
 col_sla1.metric("Lead Time Médio (Projetos)", f"{slas['avg_lead_time']} dias")
-col_sla2.metric("SLA 1ª Resposta (Chat)", f"{slas['avg_first_response']} horas")
+col_sla2.metric("SLA 1ª Resposta (Chat das Tarefas)", f"{slas['avg_first_response']} horas")
 
 if not projetos_concluidos.empty:
     df_concluidos_copy = projetos_concluidos.copy()
@@ -87,9 +90,9 @@ else:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# ÚNICO GRÁFICO: STATUS DO PROJETO
+# GRÁFICO FOCADO (STATUS)
 # ==========================================
-st.markdown("### 📈 Status Atual dos Projetos")
+st.markdown("### 📈 Status Atual da Operação")
 with st.container(border=True):
     fig_status = px.pie(
         df_projects, 
@@ -97,12 +100,13 @@ with st.container(border=True):
         hole=0.45,
         color='status',
         color_discrete_map={
+            'Não Iniciado': '#BDC3C7',
+            'Em Planejamento': '#9B59B6',
+            'Em Execução': '#3498DB',
+            'Aguardando Aprovação': '#F1C40F',
+            'Pausado / Bloqueado': '#E74C3C',
             'Concluído': '#2ECC71',
-            'Em Andamento': '#3498DB',
-            'Aguardando Início': '#BDC3C7',
-            'Parado': '#E74C3C',
-            'Aguardando Aprovação Orçamentária': '#F39C12',
-            'Cancelado': '#000000'
+            'Cancelado': '#34495E'
         }
     )
     fig_status.update_layout(margin=dict(t=20, b=20, l=0, r=0))
