@@ -43,12 +43,12 @@ def save_project(base_data, spec_data, is_melhoria):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Inserir Projeto Base
+    # Inserir Projeto Base com o status inicial de mercado ("Não Iniciado")
     cursor.execute('''
         INSERT INTO projects (code, name, requester, sponsor, manager_id, type, priority, complexity, start_date, due_date, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (base_data['code'], base_data['name'], base_data['requester'], base_data['sponsor'], base_data['manager_id'], 
-          base_data['type'], base_data['priority'], base_data['complexity'], base_data['start_date'], base_data['due_date'], 'Backlog'))
+          base_data['type'], base_data['priority'], base_data['complexity'], base_data['start_date'], base_data['due_date'], 'Não Iniciado'))
     
     project_id = cursor.lastrowid
     
