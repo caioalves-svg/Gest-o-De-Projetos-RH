@@ -1,14 +1,18 @@
 import streamlit as st
+
+# DEVE SER A PRIMEIRA LINHA
+st.set_page_config(page_title="Sistema RH", layout="wide", initial_sidebar_state="expanded")
+
 from database.setup import init_db
 from utils.layout import aplicar_estilo_corporativo
 
-# Força o estado expandido
-st.set_page_config(page_title="Sistema RH", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
-
+# Inicializa o banco
 init_db()
+
+# Aplica layout e menu lateral
 aplicar_estilo_corporativo()
 
+# Conteúdo Principal
 st.title("🚀 Central de Projetos RH")
-st.write("---")
-st.markdown("### Bem-vindo ao seu Workspace.")
-st.write("Utilize o menu lateral para gerenciar suas demandas e visualizar indicadores.")
+st.markdown("---")
+st.write("Bem-vindo ao sistema. Utilize o menu lateral para navegar.")
