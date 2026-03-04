@@ -38,44 +38,31 @@ if df_projects.empty:
     st.info("Nenhum projeto cadastrado.")
     st.stop()
 
-# Ajuste de Datas
 df_projects['due_date'] = pd.to_datetime(df_projects['due_date'], errors='coerce')
 df_projects['real_end_date'] = pd.to_datetime(df_projects['real_end_date'], errors='coerce')
 df_projects['start_date'] = pd.to_datetime(df_projects['start_date'], errors='coerce')
 
-# Cálculos Baseados nos Novos Status de Mercado
 projetos_concluidos = df_projects[df_projects['status'] == 'Concluído']
 projetos_pendentes = df_projects[df_projects['status'].isin(['Não Iniciado', 'Em Planejamento', 'Em Execução', 'Aguardando Aprovação'])]
 projetos_parados = df_projects[df_projects['status'] == 'Pausado / Bloqueado']
 
-# KPI Principal
-if not projetos_concluidos.empty:
-    no_prazo = projetos_concluidos[projetos_concluidos['real_end_date'] <= projetos_concluidos['due_date']]
-    kpi_prazo_pct = (len(no_prazo) / len(projetos_concluidos)) * 100
-else:
-    kpi_prazo_pct = 0.0
+kpi_prazo_pct = (len(projetos_concluidos[projetos_concluidos['real_end_date'] <= projetos_concluidos['due_date']]) / len(projetos_concluidos)) * 100 if not projetos_concluidos.empty else 0.0
 
 slas = obter_metricas_gerais_sla()
 
-# ==========================================
-# MÉTRICAS DE EXECUÇÃO
-# ==========================================
+# QUADROS DE MÉTRICAS (VISÃO EXECUTIVA)
 st.markdown("### 🎯 Visão Executiva do Portfólio")
 col1, col2, col3, col4 = st.columns(4)
-
 col1.metric("Projetos Totais (Cadastrados)", len(df_projects))
 col2.metric("🏆 % Entregue no Prazo", f"{kpi_prazo_pct:.1f}%")
-col3.metric("⏳ Em Andamento (Ativos)", len(projetos_pendentes))
+col3.metric("⏳ Ativos / Em Andamento", len(projetos_pendentes))
 col4.metric("🛑 Pausados / Bloqueados", len(projetos_parados))
 
 st.divider()
 
-# ==========================================
-# MÉTRICAS DE SLA E CAPACIDADE
-# ==========================================
+# QUADROS DE SLA
 st.markdown("### ⏱️ Acordos de Nível de Serviço (SLA)")
 col_sla1, col_sla2, col_sla3 = st.columns(3)
-
 col_sla1.metric("Lead Time Médio (Projetos)", f"{slas['avg_lead_time']} dias")
 col_sla2.metric("SLA 1ª Resposta (Chat das Tarefas)", f"{slas['avg_first_response']} horas")
 
@@ -89,9 +76,7 @@ else:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ==========================================
-# GRÁFICO FOCADO (STATUS)
-# ==========================================
+# ÚNICO GRÁFICO (STATUS)
 st.markdown("### 📈 Status Atual da Operação")
 with st.container(border=True):
     fig_status = px.pie(
