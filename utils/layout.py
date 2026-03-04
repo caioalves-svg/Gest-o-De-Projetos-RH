@@ -1,13 +1,20 @@
 import streamlit as st
 
 def aplicar_estilo_corporativo():
-    # Esconde elementos padrão do Streamlit (Top menu, rodapé, e a barra colorida superior)
     st.markdown("""
         <style>
+            /* Esconde apenas os três pontinhos (menu padrão) e o rodapé */
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            header {visibility: hidden;}
             
+            /* A CORREÇÃO ESTÁ AQUI: Oculta o botão Deploy, mas mantém a seta do menu! */
+            [data-testid="stHeader"] {
+                background-color: transparent !important;
+            }
+            [data-testid="stToolbar"] {
+                display: none !important;
+            }
+
             /* Fundo geral mais suave para destacar os cartões brancos */
             .stApp {
                 background-color: #F8FAFC;
