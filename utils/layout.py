@@ -1,49 +1,54 @@
 import streamlit as st
-from auth.security import login
 
 def aplicar_estilo_corporativo():
-    # CSS para esconder o menu nativo e travar o visual SaaS
+    # CSS injetado no topo para evitar flicker (piscada)
     st.markdown("""
         <style>
-            /* Esconde a navegação padrão de arquivos */
             [data-testid="stSidebarNav"] {display: none !important;}
             header {background: transparent !important;}
             footer {visibility: hidden;}
             .stApp { background-color: #F8FAFC; }
+            section[data-testid="stSidebar"] { min-width: 280px !important; }
             
-            /* Mantém a largura da sidebar fixa */
-            section[data-testid="stSidebar"] {
-                min-width: 300px !important;
-                max-width: 300px !important;
+            /* Estilo dos botões do menu lateral */
+            .menu-btn {
+                width: 100%;
+                text-align: left;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 5px;
+                cursor: pointer;
             }
         </style>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
         if st.session_state.get('logged_in'):
-            st.markdown(f"### 👋 Olá, {st.session_state.get('name', 'Usuário')}")
-            st.caption(f"Perfil: {st.session_state.get('role', '').upper()}")
+            st.markdown(f"### 👋 Olá, {st.session_state['name']}")
+            st.caption(f"Perfil: {st.session_state['role'].upper()}")
             st.divider()
             
-            # Navegação Customizada (Aparece em TODAS as páginas)
-            st.page_link("pages/2_📋_Projetos.py", label="Workspace de Projetos", icon="🏢")
-            st.page_link("pages/3_➕_Novo_Projeto.py", label="Novo Projeto", icon="🚀")
+            # Navegação Instantânea via Session State
+            if st.button("🏢 Workspace de Projetos", use_container_width=True):
+                st.session_state['pagina_ativa'] = "projetos"
+                st.rerun()
+                
+            if st.button("🚀 Iniciar Novo Projeto", use_container_width=True):
+                st.session_state['pagina_ativa'] = "novo_projeto"
+                st.rerun()
             
-            if st.session_state.get('role') == 'admin':
-                st.markdown("<br>**ADMINISTRAÇÃO**", unsafe_allow_html=True)
-                st.page_link("pages/1_📊_Dashboard.py", label="Dashboard Executivo", icon="📊")
-                st.page_link("pages/4_⚙️_Configuracoes.py", label="Configurações", icon="⚙️")
+            if st.session_state['role'] == 'admin':
+                st.markdown("<br>**ESTRATÉGICO**", unsafe_allow_html=True)
+                if st.button("📊 Dashboard Executivo", use_container_width=True):
+                    st.session_state['pagina_ativa'] = "dashboard"
+                    st.rerun()
+                if st.button("⚙️ Configurações", use_container_width=True):
+                    st.session_state['pagina_ativa'] = "config"
+                    st.rerun()
             
             st.divider()
             if st.button("🚪 Sair", use_container_width=True):
                 st.session_state.clear()
                 st.rerun()
         else:
-            st.warning("🔐 Login Necessário")
-            with st.form("login_sidebar"):
-                u = st.text_input("Usuário")
-                p = st.text_input("Senha", type="password")
-                if st.form_submit_button("Entrar"):
-                    if login(u, p): st.rerun()
-                    else: st.error("Incorreto")
-            st.stop()
+            st.stop() # Bloqueia o resto se não logado
