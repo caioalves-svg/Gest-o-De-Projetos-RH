@@ -21,9 +21,6 @@ def render():
     user_role = st.session_state['role']
     can_edit = st.session_state.get('can_edit_tasks', False)
 
-    # ==========================================
-    # VISÃO 1: PORTFÓLIO
-    # ==========================================
     if st.session_state.get('selected_project_id') is None:
         st.title("🏢 Workspace de Projetos")
         st.markdown("<p style='color: #64748B;'>Acompanhe e gira as entregas estratégicas de RH.</p>", unsafe_allow_html=True)
@@ -45,23 +42,17 @@ def render():
                     with st.container(border=True):
                         st.markdown(f"<p style='color: #3B82F6; font-weight: 800; margin-bottom: 0;'>{row['code']}</p>", unsafe_allow_html=True)
                         st.markdown(f"<h4 style='color: #0F172A; margin-top: 0;'>{row['name']}</h4>", unsafe_allow_html=True)
-                        
                         st.markdown(f"{obter_badge_status(row['status'])}", unsafe_allow_html=True)
                         st.markdown(f"<p style='color: #64748B; font-size: 0.85em; margin-top: 10px;'>👤 Gestor: <b>{row['manager_name']}</b></p>", unsafe_allow_html=True)
-                        
                         if st.button("Abrir Sala do Projeto ➔", key=f"abrir_{row['id']}", use_container_width=True):
                             st.session_state['selected_project_id'] = row['id']
                             st.session_state['selected_project_data'] = row.to_dict()
                             st.rerun()
 
-    # ==========================================
-    # VISÃO 2: SALA DO PROJETO & KANBAN
-    # ==========================================
     else:
         p_data = st.session_state['selected_project_data']
         pid = p_data['id']
 
-        # CABEÇALHO DA SALA E EXCLUSÃO
         col_voltar, col_titulo, col_acoes = st.columns([1, 6, 3])
         if col_voltar.button("⬅ Voltar ao Hub"):
             st.session_state['selected_project_id'] = None
@@ -70,11 +61,9 @@ def render():
         col_titulo.markdown(f"<h2 style='margin:0; color: #0F172A;'>{p_data['code']} - {p_data['name']}</h2>", unsafe_allow_html=True)
         
         with col_acoes:
-            # BOTÃO DE EXCLUIR PROJETO (Apenas Admin)
             if user_role == 'admin':
                 if st.button("🗑️ Excluir Projeto", type="secondary", use_container_width=True):
                     conn = sqlite3.connect(DB_PATH)
-                    # Exclusão em Cascata para não corromper a BD
                     conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (pid,))
                     conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM project_melhoria WHERE project_id = ?", (pid,))
@@ -87,7 +76,6 @@ def render():
 
         st.divider()
 
-        # GESTÃO DE STATUS
         st_list = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído"]
         if p_data['status'] not in st_list: st_list.append(p_data['status'])
         
@@ -103,12 +91,10 @@ def render():
         st.markdown("<br>", unsafe_allow_html=True)
         tab_kanban, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📄 Escopo e Documentação"])
 
-        # --- TAB KANBAN ---
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
             users_dict = dict(zip(pd.read_sql_query("SELECT id, name FROM users", conn)['id'], pd.read_sql_query("SELECT id, name FROM users", conn)['name']))
             
-            # Adicionar Tarefa
             if user_role == 'admin' or can_edit:
                 with st.expander("➕ Criar Nova Tarefa para a Equipa"):
                     with st.form(f"add_task_{pid}", clear_on_submit=True):
@@ -123,7 +109,6 @@ def render():
             st.markdown("<br>", unsafe_allow_html=True)
             df_tasks = pd.read_sql_query("SELECT t.*, u.name as assignee_name FROM tasks t LEFT JOIN users u ON t.assignee_id = u.id WHERE t.project_id = ?", conn, params=(pid,))
             
-            # QUADRO KANBAN
             c_todo, c_doing, c_done = st.columns(3)
             for st_label, col_obj in {"To Do": c_todo, "Doing": c_doing, "Done": c_done}.items():
                 with col_obj:
@@ -154,17 +139,18 @@ def render():
                                         if m:
                                             conn.execute("INSERT INTO task_chats (task_id, user_id, message) VALUES (?,?,?)", (t['id'], user_id, m))
                                             conn.commit(); st.rerun()
+            conn.close()
 
-            # --- TAB DOCUMENTAÇÃO ---
-            with tab_doc:
-                if p_data['type'] == 'Melhoria':
-                    det = pd.read_sql_query("SELECT * FROM project_melhoria WHERE project_id = ?", conn, params=(pid,))
-                    if not det.empty: 
-                        st.info(f"**Cenário Atual (As-Is):**\n\n{det.iloc[0]['as_is']}")
-                        st.success(f"**Cenário Desejado (To-Be):**\n\n{det.iloc[0]['to_be']}")
-                else:
-                    det = pd.read_sql_query("SELECT * FROM project_implantacao WHERE project_id = ?", conn, params=(pid,))
-                    if not det.empty:
-                        st.info(f"**Justificativa:**\n\n{det.iloc[0]['justification']}")
-                        st.warning(f"**Riscos:**\n\n{det.iloc[0]['risk']}")
+        with tab_doc:
+            conn = sqlite3.connect(DB_PATH)
+            if p_data['type'] == 'Melhoria':
+                det = pd.read_sql_query("SELECT * FROM project_melhoria WHERE project_id = ?", conn, params=(pid,))
+                if not det.empty: 
+                    st.info(f"**Cenário Atual (As-Is):**\n\n{det.iloc[0]['as_is']}")
+                    st.success(f"**Cenário Desejado (To-Be):**\n\n{det.iloc[0]['to_be']}")
+            else:
+                det = pd.read_sql_query("SELECT * FROM project_implantacao WHERE project_id = ?", conn, params=(pid,))
+                if not det.empty:
+                    st.info(f"**Justificativa:**\n\n{det.iloc[0]['justification']}")
+                    st.warning(f"**Riscos:**\n\n{det.iloc[0]['risk']}")
             conn.close()
