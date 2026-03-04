@@ -1,25 +1,28 @@
 import streamlit as st
+
+# DEVE SER A PRIMEIRA LINHA - Força o menu a ficar expandido
+st.set_page_config(page_title="Novo Projeto", layout="wide", initial_sidebar_state="expanded")
+
 import sqlite3
+import pandas as pd
+from datetime import datetime
 import os
 import sys
 
+# Ajuste de paths
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
-from auth.security import check_auth
 from utils.layout import aplicar_estilo_corporativo
 
-# Configuração e Layout
-st.set_page_config(page_title="Novo Projeto", page_icon="➕", layout="wide", initial_sidebar_state="expanded")
+# Aplica o layout e o menu lateral (faz a verificação de login automaticamente)
 aplicar_estilo_corporativo()
 
-check_auth()
-
 if st.session_state.get('role') != 'admin':
-    st.error("🔒 Apenas administradores podem cadastrar novos projetos.")
+    st.error("🔒 Acesso restrito a administradores.")
     st.stop()
 
 st.title("🚀 Iniciar Novo Projeto")
-st.markdown("Preencha os dados abaixo para registrar a nova iniciativa.")
+st.markdown("---")
 
 def get_users():
     conn = sqlite3.connect(DB_PATH)
@@ -27,9 +30,7 @@ def get_users():
     conn.close()
     return dict(zip(df['id'], df['name']))
 
-import pandas as pd
-
-users = get_users()
+users_dict = get_users()
 
 with st.form("form_new_project", clear_on_submit=True):
     col1, col2 = st.columns(2)
@@ -41,40 +42,29 @@ with st.form("form_new_project", clear_on_submit=True):
     p_sponsor = col4.text_input("Sponsor Executivo*")
     
     col5, col6 = st.columns(2)
-    p_manager = col5.selectbox("Gestor Responsável", list(users.keys()), format_func=lambda x: users[x])
+    p_manager = col5.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
     p_due = col6.date_input("Prazo Final Estimado")
     
     st.divider()
-    st.markdown("### Escopo Específico")
     
     if p_type == "Melhoria":
         as_is = st.text_area("Cenário Atual (As-Is)")
         to_be = st.text_area("Cenário Desejado (To-Be)")
     else:
-        just = st.text_area("Justificativa do Projeto")
-        risk = st.text_area("Principais Riscos")
+        just = st.text_area("Justificativa")
+        risk = st.text_area("Risco")
 
-    if st.form_submit_button("🚀 Lançar Projeto no Portfólio"):
-        if not p_name or not p_req:
-            st.error("Campos obrigatórios faltando.")
-        else:
+    if st.form_submit_button("Lançar Projeto"):
+        if p_name and p_req:
             conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
-            # Gerar Código Automático
             cur.execute("SELECT COUNT(*) FROM projects")
             code = f"HR-{cur.fetchone()[0] + 1:03d}"
             
-            # Inserir Base
             cur.execute("""INSERT INTO projects (code, name, requester, sponsor, manager_id, type, due_date, status, start_date) 
                            VALUES (?,?,?,?,?,?,?,?,?)""", 
                         (code, p_name, p_req, p_sponsor, p_manager, p_type, p_due, 'Não Iniciado', datetime.now().strftime('%Y-%m-%d')))
             
-            last_id = cur.lastrowid
-            # Inserir Detalhes
-            if p_type == "Melhoria":
-                cur.execute("INSERT INTO project_melhoria (project_id, as_is, to_be) VALUES (?,?,?)", (last_id, as_is, to_be))
-            else:
-                cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (last_id, just, risk))
-                
-            conn.commit(); conn.close()
-            st.success(f"Projeto {code} criado com sucesso!")
+            conn.commit()
+            conn.close()
+            st.success(f"Projeto {code} criado!")
