@@ -1,44 +1,46 @@
 import streamlit as st
 
 def aplicar_estilo_corporativo():
-    # CSS injetado no topo para evitar flicker (piscada)
+    # CSS de alta performance para travar o layout
     st.markdown("""
         <style>
+            /* Remove a navegação nativa e poluição visual */
             [data-testid="stSidebarNav"] {display: none !important;}
-            header {background: transparent !important;}
-            footer {visibility: hidden;}
+            [data-testid="stToolbar"] {visibility: hidden !important;}
+            footer {visibility: hidden !important;}
+            header {background-color: transparent !important;}
+
+            /* Fundo SaaS e Sidebar fixa */
             .stApp { background-color: #F8FAFC; }
-            section[data-testid="stSidebar"] { min-width: 280px !important; }
-            
-            /* Estilo dos botões do menu lateral */
-            .menu-btn {
-                width: 100%;
-                text-align: left;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 5px;
-                cursor: pointer;
+            section[data-testid="stSidebar"] { min-width: 300px !important; }
+
+            /* Estilo dos botões de navegação lateral */
+            .stButton > button {
+                border-radius: 10px !important;
+                text-align: left !important;
+                padding: 10px 20px !important;
+                margin-bottom: 5px !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
         if st.session_state.get('logged_in'):
-            st.markdown(f"### 👋 Olá, {st.session_state['name']}")
-            st.caption(f"Perfil: {st.session_state['role'].upper()}")
+            st.markdown(f"### 👋 Olá, {st.session_state.get('name', 'Usuário')}")
+            st.caption(f"Perfil: **{st.session_state.get('role', '').upper()}**")
             st.divider()
             
-            # Navegação Instantânea via Session State
+            st.markdown("**📁 GESTÃO**")
+            # Botões que trocam de página instantaneamente sem reload do navegador
             if st.button("🏢 Workspace de Projetos", use_container_width=True):
                 st.session_state['pagina_ativa'] = "projetos"
                 st.rerun()
-                
             if st.button("🚀 Iniciar Novo Projeto", use_container_width=True):
-                st.session_state['pagina_ativa'] = "novo_projeto"
+                st.session_state['pagina_ativa'] = "novo"
                 st.rerun()
             
-            if st.session_state['role'] == 'admin':
-                st.markdown("<br>**ESTRATÉGICO**", unsafe_allow_html=True)
+            if st.session_state.get('role') == 'admin':
+                st.markdown("<br>**👑 ESTRATÉGICO**", unsafe_allow_html=True)
                 if st.button("📊 Dashboard Executivo", use_container_width=True):
                     st.session_state['pagina_ativa'] = "dashboard"
                     st.rerun()
@@ -47,8 +49,6 @@ def aplicar_estilo_corporativo():
                     st.rerun()
             
             st.divider()
-            if st.button("🚪 Sair", use_container_width=True):
+            if st.button("🚪 Sair do Sistema", use_container_width=True):
                 st.session_state.clear()
                 st.rerun()
-        else:
-            st.stop() # Bloqueia o resto se não logado
