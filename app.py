@@ -5,7 +5,6 @@ from utils.layout import aplicar_estilo_corporativo
 
 st.set_page_config(page_title="Sistema RH", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
-# Chama a função que agora contém o CSS E o Menu
 aplicar_estilo_corporativo()
 init_db()
 
@@ -13,16 +12,18 @@ if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
 if not st.session_state['logged_in']:
-    # Tela de Login (centralizada)
-    col_l, col_c, col_r = st.columns([1, 1.2, 1])
-    with col_c:
-        st.markdown("<br><br>## ⚡ Gestão de Projetos RH", unsafe_allow_html=True)
+    # TELA DE LOGIN CENTRALIZADA
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.markdown("<br><br><h2>⚡ Gestão de Projetos RH</h2>", unsafe_allow_html=True)
         with st.form("login_form"):
             user = st.text_input("Usuário")
             pw = st.text_input("Senha", type="password")
-            if st.form_submit_button("Entrar"):
-                if login(user, pw): st.rerun()
-                else: st.error("Erro de login")
+            if st.form_submit_button("Acessar Workspace", use_container_width=True):
+                if login(user, pw):
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha incorretos.")
 else:
-    st.title("Central de Projetos")
-    st.info("Utilize o menu lateral fixo para navegar.")
+    st.title("Seja bem-vindo!")
+    st.info("Utilize o menu lateral para navegar entre os projetos e dashboards.")
