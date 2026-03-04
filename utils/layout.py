@@ -3,16 +3,19 @@ import streamlit as st
 def aplicar_estilo_corporativo():
     st.markdown("""
         <style>
-            /* Esconde apenas os três pontinhos (menu padrão) e o rodapé */
+            /* Esconde APENAS os três pontinhos padrão e o rodapé */
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             
-            /* A CORREÇÃO ESTÁ AQUI: Oculta o botão Deploy, mas mantém a seta do menu! */
-            [data-testid="stHeader"] {
-                background-color: transparent !important;
-            }
-            [data-testid="stToolbar"] {
-                display: none !important;
+            /* ========================================================
+               A CORREÇÃO ABSOLUTA: FORÇA O BOTÃO DE MENU A APARECER 
+               ======================================================== */
+            [data-testid="collapsedControl"] {
+                display: flex !important;
+                visibility: visible !important;
+                z-index: 999999 !important;
+                background-color: #F8FAFC !important;
+                border-radius: 50% !important;
             }
 
             /* Fundo geral mais suave para destacar os cartões brancos */
@@ -73,20 +76,8 @@ def aplicar_estilo_corporativo():
                 color: #334155 !important;
                 font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
             }
-
+            
             /* Tela de Login Centralizada */
-            .login-container {
-                background-color: white;
-                padding: 40px;
-                border-radius: 16px;
-                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-                margin-top: 10vh;
-                border: 1px solid #E2E8F0;
-            }
-            .login-header {
-                text-align: center;
-                margin-bottom: 30px;
-            }
             .login-header h2 {
                 color: #1E293B !important;
                 margin-bottom: 5px;
