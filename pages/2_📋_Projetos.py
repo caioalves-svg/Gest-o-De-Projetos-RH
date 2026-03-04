@@ -1,238 +1,341 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import date
+from datetime import datetime
 import os
 import sys
 
-# Ajuste de path para importações
+# Ajuste de paths
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from database.setup import DB_PATH
+from database.setup import DB_PATH, UPLOAD_DIR, init_db
+from auth.security import check_auth
 
-# Verificação de Autenticação
-if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
-    st.warning("Por favor, faça login para acessar o sistema.")
-    st.stop()
+# Garante que as tabelas existem (resolve o problema do Streamlit Cloud)
+init_db()
+check_auth()
 
-st.set_page_config(page_title="Projetos - HR Projects", page_icon="📋", layout="wide")
-st.title("📋 Gestão de Projetos")
+st.set_page_config(page_title="Workspace de Projetos", page_icon="🏢", layout="wide")
+
+# ==========================================
+# CSS CUSTOMIZADO PARA VISUAL ENTERPRISE
+# ==========================================
+st.markdown("""
+<style>
+    /* Estilo dos Cartões do Kanban */
+    .kanban-card {
+        background-color: #ffffff;
+        border-left: 4px solid #3498DB;
+        padding: 15px;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 12px;
+        transition: transform 0.2s;
+    }
+    .kanban-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
+    .kanban-card-done { border-left-color: #2ECC71; }
+    .kanban-card-doing { border-left-color: #F39C12; }
+    
+    /* Headers das Colunas */
+    .kanban-col-header {
+        font-weight: 600;
+        font-size: 1.1em;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 6px;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    
+    /* Balões de Chat */
+    .chat-bubble-me {
+        background-color: #DCF8C6;
+        padding: 10px;
+        border-radius: 10px 10px 0px 10px;
+        margin: 5px 0;
+        text-align: right;
+    }
+    .chat-bubble-other {
+        background-color: #F1F0F0;
+        padding: 10px;
+        border-radius: 10px 10px 10px 0px;
+        margin: 5px 0;
+        text-align: left;
+    }
+    .chat-meta { font-size: 0.8em; color: #666; }
+</style>
+""", unsafe_allow_html=True)
+
 
 user_id = st.session_state['user_id']
 user_role = st.session_state['role']
 
-# Funções de Banco de Dados
-def get_users():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name FROM users", conn)
-    conn.close()
-    return dict(zip(df['id'], df['name']))
+# Controle de Navegação Master-Detail
+if 'selected_project_id' not in st.session_state:
+    st.session_state['selected_project_id'] = None
 
-def generate_project_code():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(id) FROM projects")
-    count = cursor.fetchone()[0]
-    conn.close()
-    return f"HR-{count + 1:03d}"
-
-def create_project(data, specific_data, is_melhoria):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Inserir Projeto Base
-    cursor.execute('''
-        INSERT INTO projects (code, name, requester, sponsor, manager_id, type, priority, complexity, start_date, due_date, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (data['code'], data['name'], data['requester'], data['sponsor'], data['manager_id'], 
-          data['type'], data['priority'], data['complexity'], data['start_date'], data['due_date'], 'Backlog'))
-    
-    project_id = cursor.lastrowid
-    
-    # Inserir Dados Específicos
-    if is_melhoria:
-        cursor.execute('''
-            INSERT INTO project_melhoria (project_id, as_is, problem, root_cause, to_be, impacted_kpi, metric_before, metric_after)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (project_id, specific_data['as_is'], specific_data['problem'], specific_data['root_cause'], 
-              specific_data['to_be'], specific_data['impacted_kpi'], specific_data['metric_before'], specific_data['metric_after']))
-    else:
-        cursor.execute('''
-            INSERT INTO project_implantacao (project_id, justification, risk, strategic_impact, resources)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (project_id, specific_data['justification'], specific_data['risk'], 
-              specific_data['strategic_impact'], specific_data['resources']))
-        
-    conn.commit()
-    conn.close()
-
-def create_task(project_id, title, assignee_id, start_date, due_date):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO tasks (project_id, title, assignee_id, start_date, due_date, status)
-        VALUES (?, ?, ?, ?, ?, 'To Do')
-    ''', (project_id, title, assignee_id, start_date, due_date))
-    conn.commit()
-    conn.close()
-
-# Estrutura de Abas (Tabs)
-if user_role == 'admin':
-    tab_list, tab_create = st.tabs(["📂 Listagem e Detalhes", "➕ Novo Projeto"])
-else:
-    tab_list, = st.tabs(["📂 Meus Projetos"])
+def go_back_to_portfolio():
+    st.session_state['selected_project_id'] = None
 
 # ==========================================
-# ABA 1: LISTAGEM E DETALHES (Visível para todos)
+# FUNÇÕES DE BANCO DE DADOS
 # ==========================================
-with tab_list:
-    st.subheader("Projetos em Andamento e Concluídos")
-    
+def get_projects():
     conn = sqlite3.connect(DB_PATH)
     if user_role == 'admin':
-        query = "SELECT * FROM projects"
-        df_projects = pd.read_sql_query(query, conn)
+        query = "SELECT p.*, u.name as manager_name FROM projects p LEFT JOIN users u ON p.manager_id = u.id"
+        df = pd.read_sql_query(query, conn)
     else:
         query = """
-            SELECT DISTINCT p.* FROM projects p
+            SELECT DISTINCT p.*, u.name as manager_name FROM projects p
+            LEFT JOIN users u ON p.manager_id = u.id
             LEFT JOIN tasks t ON p.id = t.project_id
             WHERE p.manager_id = ? OR t.assignee_id = ?
         """
-        df_projects = pd.read_sql_query(query, conn, params=(user_id, user_id))
+        df = pd.read_sql_query(query, conn, params=(user_id, user_id))
+    conn.close()
+    return df
+
+def get_project_details(project_id, p_type):
+    conn = sqlite3.connect(DB_PATH)
+    if p_type == 'Melhoria':
+        df = pd.read_sql_query("SELECT * FROM project_melhoria WHERE project_id = ?", conn, params=(project_id,))
+    else:
+        df = pd.read_sql_query("SELECT * FROM project_implantacao WHERE project_id = ?", conn, params=(project_id,))
+    conn.close()
+    return df.iloc[0].to_dict() if not df.empty else {}
+
+def get_tasks(project_id):
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT t.*, u.name as assignee_name 
+        FROM tasks t 
+        LEFT JOIN users u ON t.assignee_id = u.id 
+        WHERE t.project_id = ?
+    """
+    df = pd.read_sql_query(query, conn, params=(project_id,))
+    conn.close()
+    return df
+
+def get_chat_history(task_id):
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT c.*, u.name as user_name 
+        FROM task_chats c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.task_id = ?
+        ORDER BY c.created_at ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(task_id,))
+    conn.close()
+    return df
+
+def send_chat_message(task_id, message, file_path=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO task_chats (task_id, user_id, message, file_path)
+        VALUES (?, ?, ?, ?)
+    """, (task_id, user_id, message, file_path))
+    conn.commit()
     conn.close()
 
+# ==========================================
+# VISÃO 1: PORTFÓLIO (MASTER)
+# ==========================================
+if st.session_state['selected_project_id'] is None:
+    st.title("🏢 Portfólio de Projetos")
+    st.markdown("Selecione um projeto abaixo para abrir a **Sala de Comando**.")
+    
+    df_projects = get_projects()
+    
     if df_projects.empty:
-        st.info("Nenhum projeto encontrado.")
+        st.info("Nenhum projeto encontrado. Peça para o Admin cadastrar novos projetos.")
     else:
-        # Exibir projetos usando expanders para ver detalhes
-        users_dict = get_users()
-        
-        for _, row in df_projects.iterrows():
-            manager_name = users_dict.get(row['manager_id'], 'Desconhecido')
-            status_color = "🟢" if row['status'] == 'Concluído' else "🟡" if row['status'] in ['Em Progresso', 'Backlog'] else "🔴"
+        # Layout de Cards para os Projetos
+        cols = st.columns(3)
+        for idx, row in df_projects.iterrows():
+            with cols[idx % 3]:
+                # Card visual do projeto
+                with st.container(border=True):
+                    status_color = "🟢" if row['status'] == 'Concluído' else "🟡" if row['status'] in ['Em Progresso', 'Backlog'] else "🔴"
+                    st.markdown(f"### {status_color} {row['code']}")
+                    st.markdown(f"**{row['name']}**")
+                    st.caption(f"Tipo: {row['type']} | Gestor: {row['manager_name']}")
+                    st.progress(100 if row['status'] == 'Concluído' else 50 if row['status'] == 'Em Progresso' else 10)
+                    
+                    if st.button("Abrir Workspace ➔", key=f"open_{row['id']}", use_container_width=True):
+                        st.session_state['selected_project_id'] = row['id']
+                        st.session_state['selected_project_data'] = row.to_dict()
+                        st.rerun()
+
+# ==========================================
+# VISÃO 2: SALA DO PROJETO (DETAIL)
+# ==========================================
+else:
+    p_data = st.session_state['selected_project_data']
+    p_id = p_data['id']
+    
+    # Header da Sala
+    col_back, col_title = st.columns([1, 10])
+    with col_back:
+        if st.button("⬅ Voltar"):
+            go_back_to_portfolio()
+            st.rerun()
             
-            with st.expander(f"{status_color} [{row['code']}] {row['name']} - {row['status']}"):
-                col_info1, col_info2, col_info3 = st.columns(3)
-                col_info1.write(f"**Tipo:** {row['type']}")
-                col_info1.write(f"**Gerente:** {manager_name}")
-                col_info2.write(f"**Prioridade:** {row['priority']}")
-                col_info2.write(f"**Complexidade:** {row['complexity']}")
-                col_info3.write(f"**Início:** {row['start_date']}")
-                col_info3.write(f"**Prazo:** {row['due_date']}")
-                
-                # Admin pode alterar status, data real de conclusão e valor economizado
-                if user_role == 'admin':
-                    st.divider()
-                    st.write("🛠️ **Ações Administrativas**")
-                    with st.form(key=f"admin_actions_{row['id']}"):
-                        col_a1, col_a2, col_a3 = st.columns(3)
-                        new_status = col_a1.selectbox("Status", ["Backlog", "Em Progresso", "Concluído", "Atrasado"], index=["Backlog", "Em Progresso", "Concluído", "Atrasado"].index(row['status']))
-                        real_end = col_a2.date_input("Data Real de Conclusão", value=pd.to_datetime(row['real_end_date']) if pd.notnull(row['real_end_date']) else None)
-                        saved_val = col_a3.number_input("Valor Economizado (R$)", value=float(row['saved_value']) if pd.notnull(row['saved_value']) else 0.0, step=100.0)
-                        
-                        if st.form_submit_button("Atualizar Projeto"):
+    with col_title:
+        st.title(f"[{p_data['code']}] {p_data['name']}")
+        st.caption(f"Status: **{p_data['status']}** | Início: {p_data['start_date']} | Prazo: {p_data['due_date']}")
+
+    st.divider()
+
+    # ABAS DA SALA DE COMANDO
+    tab_kanban, tab_overview = st.tabs(["🗂️ Quadro Kanban & Chat", "📊 Visão Geral do Escopo"])
+
+    # ----------------------------------------
+    # ABA 1: KANBAN & CHAT DA TAREFA
+    # ----------------------------------------
+    with tab_kanban:
+        df_tasks = get_tasks(p_id)
+        
+        # Botão de Nova Tarefa (Apenas Admin pode criar)
+        if user_role == 'admin':
+            with st.expander("➕ Adicionar Nova Tarefa"):
+                with st.form("form_new_task"):
+                    t_title = st.text_input("Título da Tarefa*")
+                    t_desc = st.text_area("Descrição")
+                    
+                    # Carregar usuários para atribuir
+                    conn = sqlite3.connect(DB_PATH)
+                    users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
+                    conn.close()
+                    user_dict = dict(zip(users_df['id'], users_df['name']))
+                    
+                    t_assignee = st.selectbox("Responsável*", options=list(user_dict.keys()), format_func=lambda x: user_dict[x])
+                    t_due = st.date_input("Prazo")
+                    
+                    if st.form_submit_button("Criar Tarefa"):
+                        if t_title:
                             conn = sqlite3.connect(DB_PATH)
-                            c = conn.cursor()
-                            c.execute("UPDATE projects SET status=?, real_end_date=?, saved_value=? WHERE id=?", 
-                                      (new_status, real_end, saved_val, row['id']))
+                            conn.execute("INSERT INTO tasks (project_id, title, description, assignee_id, due_date) VALUES (?, ?, ?, ?, ?)", 
+                                         (p_id, t_title, t_desc, t_assignee, t_due))
                             conn.commit()
                             conn.close()
-                            st.success("Atualizado!")
+                            st.success("Tarefa criada!")
                             st.rerun()
-
-                    # Admin pode criar tarefas para o projeto
-                    st.write("➕ **Adicionar Tarefa ao Projeto**")
-                    with st.form(key=f"new_task_{row['id']}"):
-                        t_title = st.text_input("Título da Tarefa")
-                        col_t1, col_t2, col_t3 = st.columns(3)
-                        t_assignee = col_t1.selectbox("Responsável", options=list(users_dict.keys()), format_func=lambda x: users_dict[x])
-                        t_start = col_t2.date_input("Data de Início")
-                        t_due = col_t3.date_input("Prazo da Tarefa")
-                        
-                        if st.form_submit_button("Criar Tarefa"):
-                            create_task(row['id'], t_title, t_assignee, t_start, t_due)
-                            st.success("Tarefa criada! Ela já aparecerá no Kanban.")
-                            st.rerun()
-
-# ==========================================
-# ABA 2: NOVO PROJETO (Apenas Admin)
-# ==========================================
-if user_role == 'admin':
-    with tab_create:
-        st.subheader("Cadastrar Novo Projeto")
+                        else:
+                            st.error("Título é obrigatório.")
         
-        with st.form("form_new_project"):
-            # Informações Básicas
-            st.markdown("##### 📌 Identificação")
-            col1, col2 = st.columns([3, 1])
-            p_name = col1.text_input("Nome do Projeto*")
-            p_code = col2.text_input("Código", value=generate_project_code(), disabled=True)
-            
-            col3, col4, col5 = st.columns(3)
-            p_requester = col3.text_input("Área Solicitante*")
-            p_sponsor = col4.text_input("Sponsor*")
-            
-            users_dict = get_users()
-            p_manager = col5.selectbox("Gerente do Projeto*", options=list(users_dict.keys()), format_func=lambda x: users_dict[x])
-            
-            col6, col7, col8 = st.columns(3)
-            p_priority = col6.selectbox("Prioridade", ["Baixa", "Média", "Alta"])
-            p_complexity = col7.selectbox("Complexidade", ["Baixa", "Média", "Alta"])
-            p_type = col8.radio("Tipo de Projeto*", ["Melhoria", "Implantação"], horizontal=True)
-            
-            col9, col10 = st.columns(2)
-            p_start = col9.date_input("Data de Início Prevista")
-            p_due = col10.date_input("Data Prevista de Entrega")
-            
-            st.divider()
-            
-            # Campos Dinâmicos (Streamlit re-renderiza form, mas dentro do form o st.radio funciona para layout condicional se usarmos session_state, 
-            # porém no Streamlit st.form bloqueia interatividade até o submit. Para contornar e mostrar campos dinâmicos, vamos mostrar todos e validar no backend, ou fechar o form principal).
-            # Como st.form não permite updates dinâmicos em tempo real do st.radio, renderizamos ambos os blocos e avisamos o usuário para preencher o correspondente.
-            st.markdown("##### 🔎 Detalhamento Específico")
-            st.info("Preencha apenas a coluna correspondente ao Tipo de Projeto selecionado acima.")
-            
-            col_melhoria, col_implanta = st.columns(2)
-            
-            with col_melhoria:
-                st.markdown("**Se for Melhoria:**")
-                m_as_is = st.text_area("As-Is (Cenário Atual)")
-                m_problem = st.text_input("Problema Identificado")
-                m_root = st.text_input("Causa Raiz")
-                m_to_be = st.text_area("To-Be (Cenário Futuro)")
-                m_kpi = st.text_input("Indicador Impactado")
-                m_before = st.text_input("Métrica Antes")
-                m_after = st.text_input("Métrica Depois")
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Layout das Colunas do Kanban
+        col_todo, col_doing, col_done = st.columns(3)
+        
+        with col_todo:
+            st.markdown("<div class='kanban-col-header'>📝 A Fazer (To Do)</div>", unsafe_allow_html=True)
+        with col_doing:
+            st.markdown("<div class='kanban-col-header'>⏳ Em Progresso (Doing)</div>", unsafe_allow_html=True)
+        with col_done:
+            st.markdown("<div class='kanban-col-header'>✅ Concluído (Done)</div>", unsafe_allow_html=True)
+
+        if not df_tasks.empty:
+            for _, task in df_tasks.iterrows():
+                t_id = task['id']
+                t_status = task['status']
                 
-            with col_implanta:
-                st.markdown("**Se for Implantação:**")
-                i_just = st.text_area("Justificativa")
-                i_risk = st.text_area("Risco da Não Implantação")
-                i_impact = st.text_input("Impacto Estratégico")
-                i_resources = st.text_area("Recursos Necessários")
+                # Determina o alvo
+                target_col = col_todo if t_status == 'To Do' else col_doing if t_status == 'Doing' else col_done
+                css_class = "kanban-card" if t_status == 'To Do' else "kanban-card kanban-card-doing" if t_status == 'Doing' else "kanban-card kanban-card-done"
                 
-            submit_project = st.form_submit_button("💾 Salvar Projeto", type="primary")
-            
-            if submit_project:
-                if not p_name or not p_requester or not p_sponsor:
-                    st.error("Preencha os campos obrigatórios (*).")
-                else:
-                    base_data = {
-                        'code': p_code, 'name': p_name, 'requester': p_requester, 'sponsor': p_sponsor,
-                        'manager_id': p_manager, 'type': p_type, 'priority': p_priority, 
-                        'complexity': p_complexity, 'start_date': p_start, 'due_date': p_due
-                    }
+                with target_col:
+                    # O Cartão Visual
+                    st.markdown(f"""
+                        <div class="{css_class}">
+                            <div style="font-weight:bold; font-size:1.1em;">{task['title']}</div>
+                            <div style="color:#666; font-size:0.9em; margin-top:5px;">👤 {task['assignee_name']}</div>
+                            <div style="color:#e74c3c; font-size:0.8em;">📅 {task['due_date']}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
                     
-                    if p_type == "Melhoria":
-                        spec_data = {
-                            'as_is': m_as_is, 'problem': m_problem, 'root_cause': m_root,
-                            'to_be': m_to_be, 'impacted_kpi': m_kpi, 'metric_before': m_before, 'metric_after': m_after
-                        }
-                        create_project(base_data, spec_data, is_melhoria=True)
-                    else:
-                        spec_data = {
-                            'justification': i_just, 'risk': i_risk, 'strategic_impact': i_impact, 'resources': i_resources
-                        }
-                        create_project(base_data, spec_data, is_melhoria=False)
-                        
-                    st.success(f"Projeto {p_code} criado com sucesso!")
-                    st.rerun()
+                    # Interações do Cartão (Mover e Chat)
+                    col_move, col_chat = st.columns([1, 1])
+                    
+                    # Mover Status
+                    new_status = col_move.selectbox("Mover:", ["To Do", "Doing", "Done"], index=["To Do", "Doing", "Done"].index(t_status), key=f"move_{t_id}", label_visibility="collapsed")
+                    if new_status != t_status:
+                        conn = sqlite3.connect(DB_PATH)
+                        conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (new_status, t_id))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+
+                    # Abrir Chat / Detalhes da Tarefa
+                    if col_chat.button("💬 Abrir Chat", key=f"btn_chat_{t_id}", use_container_width=True):
+                        st.session_state[f'show_chat_{t_id}'] = not st.session_state.get(f'show_chat_{t_id}', False)
+
+                    # Painel Expansível de Chat e Anexos
+                    if st.session_state.get(f'show_chat_{t_id}', False):
+                        with st.container(border=True):
+                            st.markdown("#### Histórico e Comunicação")
+                            st.caption(task['description'] if task['description'] else "Sem descrição adicional.")
+                            st.divider()
+                            
+                            # Renderizar Mensagens
+                            chat_history = get_chat_history(t_id)
+                            for _, msg in chat_history.iterrows():
+                                is_me = msg['user_id'] == user_id
+                                bubble_class = "chat-bubble-me" if is_me else "chat-bubble-other"
+                                st.markdown(f"""
+                                    <div class="{bubble_class}">
+                                        <span class="chat-meta"><b>{msg['user_name']}</b> • {msg['created_at']}</span><br>
+                                        {msg['message']}
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Renderizar anexo se existir
+                                if msg['file_path'] and os.path.exists(msg['file_path']):
+                                    # Se for imagem, renderiza. Se não, gera link de download
+                                    if msg['file_path'].lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                                        st.image(msg['file_path'], width=250)
+                                    else:
+                                        with open(msg['file_path'], "rb") as file:
+                                            st.download_button(label="📎 Baixar Anexo", data=file, file_name=os.path.basename(msg['file_path']), key=f"dl_{msg['id']}")
+                            
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            
+                            # Formulário de Envio (Texto + Upload)
+                            with st.form(key=f"form_chat_{t_id}", clear_on_submit=True):
+                                new_msg = st.text_area("Sua mensagem...", height=80)
+                                uploaded_file = st.file_uploader("Anexar arquivo/imagem (Opcional)")
+                                submit_chat = st.form_submit_button("Enviar Mensagem ➔")
+                                
+                                if submit_chat and (new_msg or uploaded_file):
+                                    file_path_saved = None
+                                    if uploaded_file is not None:
+                                        file_path_saved = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uploaded_file.name}")
+                                        with open(file_path_saved, "wb") as f:
+                                            f.write(uploaded_file.getbuffer())
+                                            
+                                    send_chat_message(t_id, new_msg if new_msg else "📎 Arquivo Anexado", file_path_saved)
+                                    st.rerun()
+
+    # ----------------------------------------
+    # ABA 2: VISÃO GERAL (DETALHES DO ESCOPO)
+    # ----------------------------------------
+    with tab_overview:
+        st.subheader("Documentação do Projeto")
+        details = get_project_details(p_id, p_data['type'])
+        
+        if p_data['type'] == 'Melhoria':
+            col_a, col_b = st.columns(2)
+            col_a.markdown(f"**Cenário Atual (As-Is):**\n> {details.get('as_is', 'N/A')}")
+            col_a.markdown(f"**Problema Identificado:**\n> {details.get('problem', 'N/A')}")
+            col_a.markdown(f"**Causa Raiz:**\n> {details.get('root_cause', 'N/A')}")
+            col_b.markdown(f"**Cenário Futuro (To-Be):**\n> {details.get('to_be', 'N/A')}")
+            col_b.markdown(f"**Indicador Impactado:** {details.get('impacted_kpi', 'N/A')}")
+            col_b.markdown(f"Métrica Antes: `{details.get('metric_before', 'N/A')}` ➔ Depois: `{details.get('metric_after', 'N/A')}`")
+        else:
+            col_a, col_b = st.columns(2)
+            col_a.markdown(f"**Justificativa Estratégica:**\n> {details.get('justification', 'N/A')}")
+            col_a.markdown(f"**Risco da Não Implantação:**\n> {details.get('risk', 'N/A')}")
+            col_b.markdown(f"**Impacto Estratégico:**\n> {details.get('strategic_impact', 'N/A')}")
+            col_b.markdown(f"**Recursos Necessários:**\n> {details.get('resources', 'N/A')}")
