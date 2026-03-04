@@ -127,4 +127,44 @@ def render():
             c_todo, c_doing, c_done = st.columns(3)
             for st_label, col_obj in {"To Do": c_todo, "Doing": c_doing, "Done": c_done}.items():
                 with col_obj:
-                    st.markdown(f"<div style='background-color: #F1F5F9; padding: 10px; border-radius:
+                    st.markdown(f"<div style='background-color: #F1F5F9; padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; color: #475569; margin-bottom: 15px;'>{st_label.upper()}</div>", unsafe_allow_html=True)
+                    
+                    for _, t in df_tasks[df_tasks['status'] == st_label].iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"<p style='font-weight: 700; color: #0F172A; margin-bottom: 5px;'>{t['title']}</p>", unsafe_allow_html=True)
+                            st.markdown(f"<p style='font-size: 0.8em; color: #64748B;'>👤 Resp: {t['assignee_name']}</p>", unsafe_allow_html=True)
+                            
+                            n_st = st.selectbox("Avançar para:", ["To Do", "Doing", "Done"], index=["To Do", "Doing", "Done"].index(t['status']), key=f"mv_{t['id']}", label_visibility="collapsed")
+                            if n_st != t['status']:
+                                conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (n_st, t['id']))
+                                conn.commit(); st.rerun()
+                                
+                            if st.button("💬 Abrir Chat", key=f"chat_{t['id']}", use_container_width=True):
+                                st.session_state[f"show_chat_{t['id']}"] = not st.session_state.get(f"show_chat_{t['id']}", False)
+                                
+                            if st.session_state.get(f"show_chat_{t['id']}", False):
+                                st.markdown("---")
+                                chats = pd.read_sql_query("SELECT c.message, u.name FROM task_chats c JOIN users u ON c.user_id = u.id WHERE task_id = ? ORDER BY created_at ASC", conn, params=(t['id'],))
+                                for _, msg in chats.iterrows(): 
+                                    st.markdown(f"<div style='background-color: #EFF6FF; padding: 10px; border-radius: 10px; margin-bottom: 8px; border-left: 4px solid #2563EB;'><span style='font-size: 0.8em; font-weight: bold; color: #2563EB;'>{msg['name']}</span><br><span style='color: #334155; font-size: 0.9em;'>{msg['message']}</span></div>", unsafe_allow_html=True)
+                                
+                                with st.form(f"f_chat_{t['id']}", clear_on_submit=True):
+                                    m = st.text_input("Escreva algo...")
+                                    if st.form_submit_button("Enviar"):
+                                        if m:
+                                            conn.execute("INSERT INTO task_chats (task_id, user_id, message) VALUES (?,?,?)", (t['id'], user_id, m))
+                                            conn.commit(); st.rerun()
+
+            # --- TAB DOCUMENTAÇÃO ---
+            with tab_doc:
+                if p_data['type'] == 'Melhoria':
+                    det = pd.read_sql_query("SELECT * FROM project_melhoria WHERE project_id = ?", conn, params=(pid,))
+                    if not det.empty: 
+                        st.info(f"**Cenário Atual (As-Is):**\n\n{det.iloc[0]['as_is']}")
+                        st.success(f"**Cenário Desejado (To-Be):**\n\n{det.iloc[0]['to_be']}")
+                else:
+                    det = pd.read_sql_query("SELECT * FROM project_implantacao WHERE project_id = ?", conn, params=(pid,))
+                    if not det.empty:
+                        st.info(f"**Justificativa:**\n\n{det.iloc[0]['justification']}")
+                        st.warning(f"**Riscos:**\n\n{det.iloc[0]['risk']}")
+            conn.close()
