@@ -9,6 +9,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH, UPLOAD_DIR, init_db
 from auth.security import check_auth
+from services.kpi_service import calcular_sla_projeto # IMPORTA A NOVA FUNÇÃO
 
 init_db()
 check_auth()
@@ -37,7 +38,6 @@ def go_back_to_portfolio():
     st.session_state['selected_project_id'] = None
     st.session_state['confirm_delete'] = False
 
-# FUNÇÕES DE BANCO DE DADOS
 def get_projects():
     conn = sqlite3.connect(DB_PATH)
     if user_role == 'admin':
@@ -80,16 +80,11 @@ def send_chat_message(task_id, message, file_path=None):
     conn.close()
 
 def delete_project_full(project_id):
-    """Deleta o projeto e todo o seu histórico (Tarefas, Chats e Escopo)"""
     conn = sqlite3.connect(DB_PATH)
-    # Deleta os chats das tarefas deste projeto
     conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (project_id,))
-    # Deleta as tarefas
     conn.execute("DELETE FROM tasks WHERE project_id = ?", (project_id,))
-    # Deleta o escopo
     conn.execute("DELETE FROM project_melhoria WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM project_implantacao WHERE project_id = ?", (project_id,))
-    # Deleta o projeto
     conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
     conn.close()
@@ -124,6 +119,10 @@ else:
     p_data = st.session_state['selected_project_data']
     p_id = p_data['id']
     
+    # ➔ NOVO CÁLCULO DE SLA DO PROJETO PARA EXIBIÇÃO AQUI
+    sla_proj = calcular_sla_projeto(p_id)
+    sla_display = f"{sla_proj} horas" if sla_proj is not None else "Sem histórico"
+
     col_back, col_title, col_status = st.columns([1, 6, 3])
     with col_back:
         if st.button("⬅ Voltar"):
@@ -132,20 +131,11 @@ else:
             
     with col_title:
         st.title(f"[{p_data['code']}] {p_data['name']}")
-        st.caption(f"Início: {p_data['start_date']} | Prazo: {p_data['due_date']}")
+        # INCLUI O SLA MÉDIO DO PROJETO AQUI NA TELA
+        st.caption(f"Início: {p_data['start_date']} | Prazo: {p_data['due_date']} | ⏱️ **SLA de Resposta do Projeto: {sla_display}**")
 
     with col_status:
-        # STATUS DE MERCADO APLICADOS AQUI
-        status_options = [
-            "Não Iniciado", 
-            "Em Planejamento", 
-            "Em Execução", 
-            "Aguardando Aprovação", 
-            "Pausado / Bloqueado", 
-            "Concluído", 
-            "Cancelado"
-        ]
-        
+        status_options = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído", "Cancelado"]
         current_status = p_data['status']
         if current_status not in status_options:
             status_options.append(current_status)
@@ -164,7 +154,6 @@ else:
             st.success("Status atualizado!")
             st.rerun()
 
-    # ZONA DE PERIGO: EXCLUSÃO DE PROJETO (Apenas Admin)
     if user_role == 'admin':
         if st.button("🗑️ Excluir Projeto", type="secondary"):
             st.session_state['confirm_delete'] = True
@@ -183,10 +172,8 @@ else:
 
     st.divider()
 
-    # ABAS
     tab_kanban, tab_overview = st.tabs(["🗂️ Kanban & Chat das Tarefas", "📊 Visão Geral do Escopo"])
 
-    # ABA 1: KANBAN
     with tab_kanban:
         df_tasks = get_tasks(p_id)
         if user_role == 'admin':
@@ -256,7 +243,6 @@ else:
                                     send_chat_message(t_id, new_msg if new_msg else "📎 Arquivo", f_path)
                                     st.rerun()
 
-    # ABA 2: VISÃO GERAL
     with tab_overview:
         st.subheader("Documentação do Projeto")
         details = get_project_details(p_id, p_data['type'])
