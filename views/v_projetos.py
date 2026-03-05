@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+from datetime import datetime
 import os
 import sys
 
@@ -21,6 +22,9 @@ def render():
     user_role = st.session_state['role']
     can_edit = st.session_state.get('can_edit_tasks', False)
 
+    # ==========================================
+    # VISÃO 1: PORTFÓLIO
+    # ==========================================
     if st.session_state.get('selected_project_id') is None:
         st.title("🏢 Workspace de Projetos")
         st.markdown("<p style='color: #64748B;'>Acompanhe e gira as entregas estratégicas de RH.</p>", unsafe_allow_html=True)
@@ -49,6 +53,9 @@ def render():
                             st.session_state['selected_project_data'] = row.to_dict()
                             st.rerun()
 
+    # ==========================================
+    # VISÃO 2: SALA DO PROJETO & KANBAN
+    # ==========================================
     else:
         p_data = st.session_state['selected_project_data']
         pid = p_data['id']
@@ -58,7 +65,10 @@ def render():
             st.session_state['selected_project_id'] = None
             st.rerun()
             
+        # O cabeçalho agora mostra a Data de Início Real (se existir)
+        data_inicio = p_data.get('start_date', 'Aguardando Início')
         col_titulo.markdown(f"<h2 style='margin:0; color: #0F172A;'>{p_data['code']} - {p_data['name']}</h2>", unsafe_allow_html=True)
+        col_titulo.markdown(f"<p style='color: #64748B; font-size: 0.9em; margin-top: -5px;'>🚀 Início Oficial: <b>{data_inicio}</b></p>", unsafe_allow_html=True)
         
         with col_acoes:
             if user_role == 'admin':
@@ -76,21 +86,53 @@ def render():
 
         st.divider()
 
+        # ==========================================
+        # GESTÃO DE STATUS, PRAZO E AUTOMAÇÃO
+        # ==========================================
         st_list = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído"]
         if p_data['status'] not in st_list: st_list.append(p_data['status'])
         
-        col_st1, col_st2 = st.columns([3, 7])
+        col_st1, col_prazo, col_vazia = st.columns([4, 4, 2])
+        
+        # 1. Campo de Status
         novo_status_proj = col_st1.selectbox("Etapa Atual do Projeto:", st_list, index=st_list.index(p_data['status']))
-        if novo_status_proj != p_data['status']:
+        
+        # 2. Campo de Prazo Editável (Recupera a data atual ou põe a de hoje)
+        try:
+            prazo_atual = datetime.strptime(p_data['due_date'], '%Y-%m-%d').date() if p_data.get('due_date') else datetime.today().date()
+        except:
+            prazo_atual = datetime.today().date()
+            
+        novo_prazo = col_prazo.date_input("📅 Prazo Desejado (Editável):", value=prazo_atual)
+
+        # 3. Lógica de Automação de Gravação
+        mudou_status = novo_status_proj != p_data['status']
+        mudou_prazo = novo_prazo.strftime('%Y-%m-%d') != p_data.get('due_date', '')
+
+        if mudou_status or mudou_prazo:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("UPDATE projects SET status = ? WHERE id = ?", (novo_status_proj, pid))
+            hoje = datetime.now().strftime('%Y-%m-%d')
+            prazo_str = novo_prazo.strftime('%Y-%m-%d')
+            
+            # GATILHO: Se mudou para "Em Planejamento", atualiza também a data de início!
+            if mudou_status and novo_status_proj == "Em Planejamento":
+                conn.execute("UPDATE projects SET status = ?, due_date = ?, start_date = ? WHERE id = ?", 
+                             (novo_status_proj, prazo_str, hoje, pid))
+                st.session_state['selected_project_data']['start_date'] = hoje
+                st.toast("🚀 Automação: Data de Início Oficial registrada com sucesso!", icon="✅")
+            else:
+                conn.execute("UPDATE projects SET status = ?, due_date = ? WHERE id = ?", 
+                             (novo_status_proj, prazo_str, pid))
+                
             conn.commit(); conn.close()
             st.session_state['selected_project_data']['status'] = novo_status_proj
+            st.session_state['selected_project_data']['due_date'] = prazo_str
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
         tab_kanban, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📄 Escopo e Documentação"])
 
+        # --- TAB KANBAN ---
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
             users_dict = dict(zip(pd.read_sql_query("SELECT id, name FROM users", conn)['id'], pd.read_sql_query("SELECT id, name FROM users", conn)['name']))
