@@ -10,20 +10,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
 
 def salvar_arquivo(uploaded_file):
-    if uploaded_file is None:
-        return None
-    
+    if uploaded_file is None: return None
     upload_dir = "uploads"
-    if not os.path.exists(upload_dir):
-        os.makedirs(upload_dir)
-        
+    if not os.path.exists(upload_dir): os.makedirs(upload_dir)
     nome_seguro = uploaded_file.name.replace(" ", "_")
     nome_unico = f"{uuid.uuid4().hex[:8]}_{nome_seguro}"
     caminho_completo = os.path.join(upload_dir, nome_unico)
-    
-    with open(caminho_completo, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-        
+    with open(caminho_completo, "wb") as f: f.write(uploaded_file.getbuffer())
     return caminho_completo
 
 def obter_badge_status(status):
@@ -36,37 +29,29 @@ def obter_badge_status(status):
     return f"<span style='background-color: {cor_fundo}; color: {cor_texto}; padding: 4px 12px; border-radius: 999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{status}</span>"
 
 def formatar_data_pt(data_str):
-    if not data_str or data_str == 'Aguardando Início':
-        return 'Aguardando Início'
-    try:
-        return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%Y')
-    except:
-        return data_str
+    if not data_str or data_str == 'Aguardando Início': return 'Aguardando Início'
+    try: return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%Y')
+    except: return data_str
 
 def render():
     user_id = st.session_state['user_id']
     user_role = st.session_state['role']
     can_edit = st.session_state.get('can_edit_tasks', False)
 
-    # ==========================================
-    # AUTOCURA DA BASE DE DADOS 
-    # ==========================================
+    # AUTOCURA DAS TABELAS (Incluindo os Participantes)
     conn_init = sqlite3.connect(DB_PATH)
     conn_init.execute('''CREATE TABLE IF NOT EXISTS project_updates (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                        project_id INTEGER NOT NULL, 
-                        user_id INTEGER NOT NULL, 
-                        update_text TEXT, 
-                        created_at DATETIME)''')
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, 
+                        user_id INTEGER NOT NULL, update_text TEXT, created_at DATETIME)''')
+    conn_init.execute('''CREATE TABLE IF NOT EXISTS project_participants (
+                        project_id INTEGER, user_id INTEGER, PRIMARY KEY (project_id, user_id))''')
     
     cursor = conn_init.cursor()
     cursor.execute("PRAGMA table_info(project_updates)")
-    colunas_updates = [col[1] for col in cursor.fetchall()]
-    if 'file_path' not in colunas_updates:
+    if 'file_path' not in [col[1] for col in cursor.fetchall()]:
         cursor.execute("ALTER TABLE project_updates ADD COLUMN file_path TEXT")
         
-    conn_init.commit()
-    conn_init.close()
+    conn_init.commit(); conn_init.close()
 
     # ==========================================
     # VISÃO 1: PORTFÓLIO
@@ -80,7 +65,13 @@ def render():
         if user_role == 'admin':
             df_p = pd.read_sql_query("SELECT p.*, u.name as manager_name FROM projects p LEFT JOIN users u ON p.manager_id = u.id", conn)
         else:
-            df_p = pd.read_sql_query(f"SELECT DISTINCT p.*, u.name as manager_name FROM projects p LEFT JOIN users u ON p.manager_id = u.id LEFT JOIN tasks t ON p.id = t.project_id WHERE p.manager_id = {user_id} OR t.assignee_id = {user_id}", conn)
+            df_p = pd.read_sql_query(f"""
+                SELECT DISTINCT p.*, u.name as manager_name FROM projects p 
+                LEFT JOIN users u ON p.manager_id = u.id 
+                LEFT JOIN tasks t ON p.id = t.project_id 
+                LEFT JOIN project_participants pp ON p.id = pp.project_id
+                WHERE p.manager_id = {user_id} OR t.assignee_id = {user_id} OR pp.user_id = {user_id}
+            """, conn)
         conn.close()
 
         if df_p.empty:
@@ -119,6 +110,7 @@ def render():
             if user_role == 'admin':
                 if st.button("🗑️ Excluir Projeto", type="secondary", use_container_width=True):
                     conn = sqlite3.connect(DB_PATH)
+                    conn.execute("DELETE FROM project_participants WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM project_updates WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (pid,))
                     conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
@@ -131,47 +123,51 @@ def render():
 
         st.divider()
 
-        # ==========================================
-        # GESTÃO DO CABEÇALHO (STATUS, PRAZO E GESTOR)
-        # ==========================================
         conn = sqlite3.connect(DB_PATH)
         users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
+        
+        # Lê os participantes atuais para exibir na tela
+        df_equipa = pd.read_sql_query("SELECT user_id FROM project_participants WHERE project_id = ?", conn, params=(pid,))
+        equipa_atual = df_equipa['user_id'].tolist()
         conn.close()
+        
         users_dict = dict(zip(users_df['id'], users_df['name']))
 
         st_list = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído"]
         if p_data['status'] not in st_list: st_list.append(p_data['status'])
         
-        # Colunas reajustadas para acomodar o Gestor Responsável
         col_st1, col_prazo, col_gestor = st.columns([3, 3, 4])
-        
-        # 1. Status
         novo_status_proj = col_st1.selectbox("Etapa Atual do Projeto:", st_list, index=st_list.index(p_data['status']))
         
-        # 2. Prazo
-        try:
-            prazo_atual = datetime.strptime(p_data['due_date'], '%Y-%m-%d').date() if p_data.get('due_date') else datetime.today().date()
-        except:
-            prazo_atual = datetime.today().date()
+        try: prazo_atual = datetime.strptime(p_data['due_date'], '%Y-%m-%d').date() if p_data.get('due_date') else datetime.today().date()
+        except: prazo_atual = datetime.today().date()
             
-        novo_prazo = col_prazo.date_input("📅 Prazo Desejado (Editável):", value=prazo_atual, format="DD/MM/YYYY")
+        novo_prazo = col_prazo.date_input("📅 Prazo Desejado:", value=prazo_atual, format="DD/MM/YYYY")
 
-        # 3. Gestor Responsável (Bloqueado para não admins)
+        # Gestor e Equipa (Proteção de Acesso)
         if user_role == 'admin':
             gestor_id_atual = p_data.get('manager_id')
             idx_gestor = list(users_dict.keys()).index(gestor_id_atual) if gestor_id_atual in users_dict else 0
             novo_manager_id = col_gestor.selectbox("👤 Gestor Responsável:", list(users_dict.keys()), format_func=lambda x: users_dict[x], index=idx_gestor)
+            
+            # Campo da Equipa
+            lista_ids_validos = [uid for uid in equipa_atual if uid in users_dict] # Proteção caso algum usuário tenha sido apagado
+            nova_equipa = st.multiselect("👥 Membros da Equipa (Participantes):", list(users_dict.keys()), format_func=lambda x: users_dict[x], default=lista_ids_validos)
         else:
             nome_gestor_atual = users_dict.get(p_data.get('manager_id'), "Desconhecido")
-            col_gestor.text_input("👤 Gestor Responsável:", value=nome_gestor_atual, disabled=True, help="Apenas administradores podem alterar o gestor.")
+            col_gestor.text_input("👤 Gestor Responsável:", value=nome_gestor_atual, disabled=True)
             novo_manager_id = p_data.get('manager_id')
+            
+            lista_ids_validos = [uid for uid in equipa_atual if uid in users_dict]
+            st.multiselect("👥 Membros da Equipa (Participantes):", list(users_dict.keys()), format_func=lambda x: users_dict[x], default=lista_ids_validos, disabled=True)
+            nova_equipa = equipa_atual
 
-        # Validação de Mudanças e Gravação no Banco
         mudou_status = novo_status_proj != p_data['status']
         mudou_prazo = novo_prazo.strftime('%Y-%m-%d') != p_data.get('due_date', '')
         mudou_manager = novo_manager_id != p_data.get('manager_id')
+        mudou_equipa = set(nova_equipa) != set(equipa_atual)
 
-        if mudou_status or mudou_prazo or mudou_manager:
+        if mudou_status or mudou_prazo or mudou_manager or mudou_equipa:
             conn = sqlite3.connect(DB_PATH)
             hoje_iso = datetime.now().strftime('%Y-%m-%d')
             prazo_str = novo_prazo.strftime('%Y-%m-%d')
@@ -180,11 +176,15 @@ def render():
                 conn.execute("UPDATE projects SET status = ?, due_date = ?, manager_id = ?, start_date = ? WHERE id = ?", 
                              (novo_status_proj, prazo_str, novo_manager_id, hoje_iso, pid))
                 st.session_state['selected_project_data']['start_date'] = hoje_iso
-                hoje_pt = datetime.now().strftime('%d/%m/%Y')
-                st.toast(f"🚀 Automação: Data de Início registrada como {hoje_pt}!", icon="✅")
+                st.toast(f"🚀 Automação: Data de Início registrada!", icon="✅")
             else:
                 conn.execute("UPDATE projects SET status = ?, due_date = ?, manager_id = ? WHERE id = ?", 
                              (novo_status_proj, prazo_str, novo_manager_id, pid))
+                
+            if mudou_equipa:
+                conn.execute("DELETE FROM project_participants WHERE project_id = ?", (pid,))
+                for uid in nova_equipa:
+                    conn.execute("INSERT INTO project_participants (project_id, user_id) VALUES (?,?)", (pid, uid))
                 
             conn.commit(); conn.close()
             st.session_state['selected_project_data']['status'] = novo_status_proj
@@ -193,11 +193,8 @@ def render():
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil", "📢 Atualizações", "📄 Escopo e Documentação"])
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
 
-        # ==========================================
-        # ABA 1: KANBAN E CHAT (COM ANEXOS)
-        # ==========================================
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
             
@@ -248,7 +245,6 @@ def render():
                                 with st.form(f"f_chat_{t['id']}", clear_on_submit=True):
                                     m = st.text_input("Escreva a sua mensagem...")
                                     arquivo_chat = st.file_uploader("📎 Anexar documento (Opcional)", key=f"up_chat_{t['id']}")
-                                    
                                     if st.form_submit_button("Enviar Mensagem"):
                                         if m or arquivo_chat:
                                             caminho_salvo = salvar_arquivo(arquivo_chat)
@@ -256,9 +252,6 @@ def render():
                                             conn.commit(); st.rerun()
             conn.close()
 
-        # ==========================================
-        # ABA 2: MURAL DE ATUALIZAÇÕES
-        # ==========================================
         with tab_updates:
             st.markdown("### 📢 Diário de Bordo do Projeto")
             st.markdown("<p style='color: #64748B;'>Registe conclusões de sprints, atas e anexe relatórios importantes.</p>", unsafe_allow_html=True)
@@ -266,7 +259,6 @@ def render():
             with st.form(f"form_update_{pid}", clear_on_submit=True):
                 novo_texto = st.text_area("Escreva a sua atualização aqui...")
                 arquivo_update = st.file_uploader("📎 Anexar Ficheiro/Ata (Opcional)", key=f"up_update_{pid}")
-                
                 if st.form_submit_button("Publicar Atualização"):
                     if novo_texto.strip() or arquivo_update:
                         caminho_salvo = salvar_arquivo(arquivo_update)
@@ -278,14 +270,11 @@ def render():
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
-            
             conn = sqlite3.connect(DB_PATH)
             df_updates = pd.read_sql_query("""
                 SELECT p.update_text, p.created_at, p.file_path, u.name 
-                FROM project_updates p 
-                JOIN users u ON p.user_id = u.id 
-                WHERE p.project_id = ? 
-                ORDER BY p.created_at DESC
+                FROM project_updates p JOIN users u ON p.user_id = u.id 
+                WHERE p.project_id = ? ORDER BY p.created_at DESC
             """, conn, params=(pid,))
             conn.close()
 
@@ -294,19 +283,15 @@ def render():
             else:
                 for upd_idx, log in df_updates.iterrows():
                     data_log_pt = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y às %H:%M')
-                    
                     with st.container(border=True):
                         st.markdown(f"<span style='color: #2563EB; font-weight: 700; font-size: 1.05em;'>{log['name']}</span> &nbsp;<span style='color: #94A3B8; font-size: 0.85em;'>• {data_log_pt}</span>", unsafe_allow_html=True)
-                        if log['update_text']:
-                            st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-                        
+                        if log['update_text']: st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
                         if log['file_path'] and os.path.exists(log['file_path']):
                             st.markdown("<br>", unsafe_allow_html=True)
                             nome_original = log['file_path'].split('_', 1)[-1] if '_' in os.path.basename(log['file_path']) else os.path.basename(log['file_path'])
                             with open(log['file_path'], "rb") as file:
                                 st.download_button(label=f"📎 Descarregar Anexo: {nome_original}", data=file, file_name=nome_original, key=f"dl_upd_{pid}_{upd_idx}")
 
-        # --- ABA 3: DOCUMENTAÇÃO ---
         with tab_doc:
             conn = sqlite3.connect(DB_PATH)
             if p_data['type'] == 'Melhoria':
