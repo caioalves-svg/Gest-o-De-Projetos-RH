@@ -23,46 +23,76 @@ def render():
     users_dict = dict(zip(users_df['id'], users_df['name']))
 
     with st.form("form_novo_proj", clear_on_submit=True):
+        # 1. DADOS BÁSICOS (Simplificados)
         col1, col2 = st.columns(2)
         nome = col1.text_input("Nome do Projeto*")
         tipo = col2.selectbox("Tipo de Iniciativa", ["Melhoria", "Implantação"])
         
         col3, col4 = st.columns(2)
-        req = col3.text_input("Área Solicitante*")
-        sponsor = col4.text_input("Sponsor Executivo")
-        
-        col5, col6 = st.columns(2)
-        manager = col5.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
-        due_date = col6.date_input("Prazo Desejado")
+        manager = col3.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
+        due_date = col4.date_input("Prazo Desejado")
 
         st.divider()
-        st.markdown("### Escopo Específico")
+        st.markdown(f"### Escopo Específico: {tipo}")
+        
+        # 2. CAMPOS CONDICIONAIS COM BASE NO TIPO
         if tipo == "Melhoria":
-            as_is = st.text_area("Cenário Atual (As-Is)")
-            to_be = st.text_area("Cenário Desejado (To-Be)")
-        else:
-            just = st.text_area("Justificativa da Implantação")
-            risk = st.text_area("Principais Riscos")
+            as_is = st.text_area(
+                "AS-IS (Situação Atual)*", 
+                help="Descreva como o processo funciona atualmente, incluindo possíveis problemas, gargalos ou limitações."
+            )
+            to_be = st.text_area(
+                "TO-BE (Situação Futura)*", 
+                help="Descreva como o processo deverá funcionar após a implementação da melhoria."
+            )
+            justificativa = ""
+            beneficios = ""
+        else: # Implantação
+            justificativa = st.text_area(
+                "Justificativa da Implantação*", 
+                help="Explique por que é necessário implantar o processo, sistema ou solução."
+            )
+            beneficios = st.text_area(
+                "Benefícios Esperados*", 
+                help="Descreva os principais benefícios que o projeto deverá trazer para a organização."
+            )
+            as_is = ""
+            to_be = ""
 
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 3. VALIDAÇÃO E SUBMISSÃO
         if st.form_submit_button("🚀 Lançar Projeto no Portfólio"):
-            if nome and req:
+            # Validação de campos obrigatórios conforme o tipo
+            valido = False
+            if not nome:
+                st.error("⚠️ O Nome do Projeto é obrigatório.")
+            elif tipo == "Melhoria" and (not as_is or not to_be):
+                st.error("⚠️ Para projetos de Melhoria, os campos 'AS-IS' e 'TO-BE' são obrigatórios.")
+            elif tipo == "Implantação" and (not justificativa or not beneficios):
+                st.error("⚠️ Para projetos de Implantação, a 'Justificativa' e os 'Benefícios Esperados' são obrigatórios.")
+            else:
+                valido = True
+
+            if valido:
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
                 cur.execute("SELECT COUNT(*) FROM projects")
                 code = f"HR-{cur.fetchone()[0] + 1:03d}"
                 
+                # Inserimos os dados na tabela principal. Requester e Sponsor vão como vazios ("")
                 cur.execute("""INSERT INTO projects (code, name, requester, sponsor, manager_id, type, due_date, status, start_date) 
                                VALUES (?,?,?,?,?,?,?,?,?)""", 
-                            (code, nome, req, sponsor, manager, tipo, due_date, 'Não Iniciado', datetime.now().strftime('%Y-%m-%d')))
+                            (code, nome, "", "", manager, tipo, due_date, 'Não Iniciado', datetime.now().strftime('%Y-%m-%d')))
                 proj_id = cur.lastrowid
                 
+                # Inserimos os detalhes baseados no tipo
                 if tipo == "Melhoria":
                     cur.execute("INSERT INTO project_melhoria (project_id, as_is, to_be) VALUES (?,?,?)", (proj_id, as_is, to_be))
                 else:
-                    cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, just, risk))
+                    # Guardamos os benefícios na coluna 'risk' existente para não precisar recriar o banco de dados
+                    cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, justificativa, beneficios))
                 
-                conn.commit(); conn.close()
-                st.success(f"✅ Projeto {code} criado com sucesso! Já está disponível no Workspace.")
-            else:
-                st.error("⚠️ Preencha os campos obrigatórios (*).")
+                conn.commit()
+                conn.close()
+                st.success(f"✅ Projeto {code} criado com sucesso! Já pode validar o fluxo no Workspace de Projetos.")
