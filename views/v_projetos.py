@@ -152,7 +152,7 @@ def render():
             
             # Campo da Equipa
             lista_ids_validos = [uid for uid in equipa_atual if uid in users_dict] # Proteção caso algum usuário tenha sido apagado
-            nova_equipa = st.multiselect("👥 Membros da Equipa (Participantes):", list(users_dict.keys()), format_func=lambda x: users_dict[x], default=lista_ids_validos)
+            nova_equipa = st.multiselect("👥 Membros da Equipe:", list(users_dict.keys()), format_func=lambda x: users_dict[x], default=lista_ids_validos)
         else:
             nome_gestor_atual = users_dict.get(p_data.get('manager_id'), "Desconhecido")
             col_gestor.text_input("👤 Gestor Responsável:", value=nome_gestor_atual, disabled=True)
