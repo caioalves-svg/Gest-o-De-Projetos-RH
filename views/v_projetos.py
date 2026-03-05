@@ -17,12 +17,10 @@ def obter_badge_status(status):
     cor_texto, cor_fundo = cores.get(status, ('#475569', '#F1F5F9'))
     return f"<span style='background-color: {cor_fundo}; color: {cor_texto}; padding: 4px 12px; border-radius: 999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{status}</span>"
 
-# Função auxiliar para formatar a data para padrão DD/MM/YYYY na tela
 def formatar_data_pt(data_str):
     if not data_str or data_str == 'Aguardando Início':
         return 'Aguardando Início'
     try:
-        # Tenta converter de YYYY-MM-DD para DD/MM/YYYY
         return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%Y')
     except:
         return data_str
@@ -31,6 +29,19 @@ def render():
     user_id = st.session_state['user_id']
     user_role = st.session_state['role']
     can_edit = st.session_state.get('can_edit_tasks', False)
+
+    # ==========================================
+    # AUTOCURA DA BASE DE DADOS (Cria tabela de atualizações se não existir)
+    # ==========================================
+    conn_init = sqlite3.connect(DB_PATH)
+    conn_init.execute('''CREATE TABLE IF NOT EXISTS project_updates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                        project_id INTEGER NOT NULL, 
+                        user_id INTEGER NOT NULL, 
+                        update_text TEXT, 
+                        created_at DATETIME)''')
+    conn_init.commit()
+    conn_init.close()
 
     # ==========================================
     # VISÃO 1: PORTFÓLIO
@@ -75,11 +86,7 @@ def render():
             st.session_state['selected_project_id'] = None
             st.rerun()
             
-        # ==========================================
-        # DATA FORMATADA NO CABEÇALHO
-        # ==========================================
         data_inicio_pt = formatar_data_pt(p_data.get('start_date', 'Aguardando Início'))
-        
         col_titulo.markdown(f"<h2 style='margin:0; color: #0F172A;'>{p_data['code']} - {p_data['name']}</h2>", unsafe_allow_html=True)
         col_titulo.markdown(f"<p style='color: #64748B; font-size: 0.9em; margin-top: -5px;'>🚀 Início Oficial: <b>{data_inicio_pt}</b></p>", unsafe_allow_html=True)
         
@@ -87,21 +94,19 @@ def render():
             if user_role == 'admin':
                 if st.button("🗑️ Excluir Projeto", type="secondary", use_container_width=True):
                     conn = sqlite3.connect(DB_PATH)
+                    # Exclusão em cascata atualizada com a nova tabela
+                    conn.execute("DELETE FROM project_updates WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (pid,))
                     conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM project_melhoria WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM project_implantacao WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
-                    conn.commit()
-                    conn.close()
+                    conn.commit(); conn.close()
                     st.session_state['selected_project_id'] = None
                     st.rerun()
 
         st.divider()
 
-        # ==========================================
-        # CALENDÁRIO COM FORMATO DD/MM/YYYY
-        # ==========================================
         st_list = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído"]
         if p_data['status'] not in st_list: st_list.append(p_data['status'])
         
@@ -114,7 +119,6 @@ def render():
         except:
             prazo_atual = datetime.today().date()
             
-        # Adicionado o format="DD/MM/YYYY"
         novo_prazo = col_prazo.date_input("📅 Prazo Desejado (Editável):", value=prazo_atual, format="DD/MM/YYYY")
 
         mudou_status = novo_status_proj != p_data['status']
@@ -122,15 +126,13 @@ def render():
 
         if mudou_status or mudou_prazo:
             conn = sqlite3.connect(DB_PATH)
-            hoje = datetime.now().strftime('%Y-%m-%d')
+            hoje_iso = datetime.now().strftime('%Y-%m-%d')
             prazo_str = novo_prazo.strftime('%Y-%m-%d')
             
             if mudou_status and novo_status_proj == "Em Planejamento":
                 conn.execute("UPDATE projects SET status = ?, due_date = ?, start_date = ? WHERE id = ?", 
-                             (novo_status_proj, prazo_str, hoje, pid))
-                st.session_state['selected_project_data']['start_date'] = hoje
-                
-                # Toast exibe a data formatada
+                             (novo_status_proj, prazo_str, hoje_iso, pid))
+                st.session_state['selected_project_data']['start_date'] = hoje_iso
                 hoje_pt = datetime.now().strftime('%d/%m/%Y')
                 st.toast(f"🚀 Automação: Data de Início registrada como {hoje_pt}!", icon="✅")
             else:
@@ -143,8 +145,13 @@ def render():
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_kanban, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📄 Escopo e Documentação"])
+        
+        # ==========================================
+        # AGORA TEMOS 3 ABAS NA SALA DO PROJETO
+        # ==========================================
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
 
+        # --- ABA 1: KANBAN ---
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
             users_dict = dict(zip(pd.read_sql_query("SELECT id, name FROM users", conn)['id'], pd.read_sql_query("SELECT id, name FROM users", conn)['name']))
@@ -195,6 +202,48 @@ def render():
                                             conn.commit(); st.rerun()
             conn.close()
 
+        # --- ABA 2: MURAL DE ATUALIZAÇÕES (NOVO) ---
+        with tab_updates:
+            st.markdown("### 📢 Diário de Bordo do Projeto")
+            st.markdown("<p style='color: #64748B;'>Utilize este espaço para registar conclusões de sprints, atas de reuniões ou comunicados gerais sobre o avanço do projeto.</p>", unsafe_allow_html=True)
+            
+            # Formulário para nova atualização
+            with st.form(f"form_update_{pid}", clear_on_submit=True):
+                novo_texto = st.text_area("Escreva a sua atualização aqui...")
+                if st.form_submit_button("Publicar Atualização"):
+                    if novo_texto.strip():
+                        conn = sqlite3.connect(DB_PATH)
+                        agora_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        conn.execute("INSERT INTO project_updates (project_id, user_id, update_text, created_at) VALUES (?,?,?,?)", (pid, user_id, novo_texto, agora_str))
+                        conn.commit(); conn.close()
+                        st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Exibir as atualizações como um feed/timeline
+            conn = sqlite3.connect(DB_PATH)
+            df_updates = pd.read_sql_query("""
+                SELECT p.update_text, p.created_at, u.name 
+                FROM project_updates p 
+                JOIN users u ON p.user_id = u.id 
+                WHERE p.project_id = ? 
+                ORDER BY p.created_at DESC
+            """, conn, params=(pid,))
+            conn.close()
+
+            if df_updates.empty:
+                st.info("Nenhuma atualização registada ainda.")
+            else:
+                for _, log in df_updates.iterrows():
+                    # Converte a data do banco para o padrão visual DD/MM/YYYY às HH:MM
+                    data_log_pt = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y às %H:%M')
+                    
+                    with st.container(border=True):
+                        st.markdown(f"<span style='color: #2563EB; font-weight: 700; font-size: 1.05em;'>{log['name']}</span> &nbsp;<span style='color: #94A3B8; font-size: 0.85em;'>• {data_log_pt}</span>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+
+
+        # --- ABA 3: DOCUMENTAÇÃO ---
         with tab_doc:
             conn = sqlite3.connect(DB_PATH)
             if p_data['type'] == 'Melhoria':
