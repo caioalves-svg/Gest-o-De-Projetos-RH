@@ -21,14 +21,12 @@ def render():
     users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
     conn.close()
     
-    # Se por algum motivo não houver utilizadores, evita erro
     if users_df.empty:
         st.error("Erro crítico: Nenhum utilizador encontrado na base de dados.")
         return
         
     users_dict = dict(zip(users_df['id'], users_df['name']))
 
-    # O selectbox fica FORA do formulário para a tela reagir na hora
     col_tipo, col_vazia = st.columns([1, 2])
     tipo = col_tipo.selectbox("Tipo de Iniciativa", ["Melhoria", "Implantação"])
 
@@ -37,7 +35,10 @@ def render():
         nome = col1.text_input("Nome do Projeto*")
         manager = col2.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
         
-        due_date = st.date_input("Prazo Desejado")
+        # ==========================================
+        # AQUI ESTÁ A CORREÇÃO DA DATA PARA PORTUGUÊS
+        # ==========================================
+        due_date = st.date_input("Prazo Desejado", format="DD/MM/YYYY")
 
         st.divider()
         st.markdown(f"### Escopo Específico: {tipo}")
@@ -71,16 +72,12 @@ def render():
                     conn = sqlite3.connect(DB_PATH)
                     cur = conn.cursor()
                     
-                    # ==========================================
-                    # A CORREÇÃO DO CÓDIGO DO PROJETO ESTÁ AQUI
-                    # ==========================================
-                    # Em vez de contar, pegamos o maior ID que já existiu e somamos 1
                     cur.execute("SELECT MAX(id) FROM projects")
                     max_id = cur.fetchone()[0]
                     next_id = (max_id or 0) + 1
                     code = f"HR-{next_id:03d}"
                     
-                    # Garantimos que a data vai como String (Texto) para o SQLite não reclamar
+                    # Garantimos que a data vai como String (Texto) padrão para a base de dados
                     data_prazo_str = due_date.strftime('%Y-%m-%d')
                     data_hoje_str = datetime.now().strftime('%Y-%m-%d')
                     
@@ -95,7 +92,9 @@ def render():
                         cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, justificativa, beneficios))
                     
                     conn.commit()
-                    st.success(f"✅ Projeto **{code}** criado com sucesso! Pode verificá-lo no Portfólio.")
+                    # Mensagem de sucesso também formatada para português!
+                    data_pt = due_date.strftime('%d/%m/%Y')
+                    st.success(f"✅ Projeto **{code}** criado com sucesso! Prazo estipulado para: **{data_pt}**.")
                 except Exception as e:
                     st.error(f"❌ Erro ao guardar na base de dados: {e}")
                 finally:
