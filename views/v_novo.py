@@ -17,7 +17,14 @@ def render():
         st.error("🔒 Acesso restrito a administradores.")
         return
 
+    # Garante que a tabela de participantes existe (Autocura)
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('''CREATE TABLE IF NOT EXISTS project_participants (
+                    project_id INTEGER, 
+                    user_id INTEGER, 
+                    PRIMARY KEY (project_id, user_id))''')
+    conn.commit()
+    
     users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
     conn.close()
     
@@ -33,12 +40,12 @@ def render():
     with st.form("form_novo_proj", clear_on_submit=True):
         col1, col2 = st.columns(2)
         nome = col1.text_input("Nome do Projeto*")
-        manager = col2.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
+        manager = col2.selectbox("👤 Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
         
-        # ==========================================
-        # AQUI ESTÁ A CORREÇÃO DA DATA PARA PORTUGUÊS
-        # ==========================================
-        due_date = st.date_input("Prazo Desejado", format="DD/MM/YYYY")
+        col3, col4 = st.columns(2)
+        due_date = col3.date_input("📅 Prazo Desejado", format="DD/MM/YYYY")
+        # NOVO CAMPO: Múltipla escolha para a Equipa!
+        equipa = col4.multiselect("👥 Membros da Equipa (Participantes)", list(users_dict.keys()), format_func=lambda x: users_dict[x])
 
         st.divider()
         st.markdown(f"### Escopo Específico: {tipo}")
@@ -77,7 +84,6 @@ def render():
                     next_id = (max_id or 0) + 1
                     code = f"HR-{next_id:03d}"
                     
-                    # Garantimos que a data vai como String (Texto) padrão para a base de dados
                     data_prazo_str = due_date.strftime('%Y-%m-%d')
                     data_hoje_str = datetime.now().strftime('%Y-%m-%d')
                     
@@ -86,13 +92,16 @@ def render():
                                 (code, nome, "", "", manager, tipo, data_prazo_str, 'Não Iniciado', data_hoje_str))
                     proj_id = cur.lastrowid
                     
+                    # GRAVAR A EQUIPA NA NOVA TABELA
+                    for uid in equipa:
+                        cur.execute("INSERT INTO project_participants (project_id, user_id) VALUES (?,?)", (proj_id, uid))
+                    
                     if tipo == "Melhoria":
                         cur.execute("INSERT INTO project_melhoria (project_id, as_is, to_be) VALUES (?,?,?)", (proj_id, as_is, to_be))
                     else:
                         cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, justificativa, beneficios))
                     
                     conn.commit()
-                    # Mensagem de sucesso também formatada para português!
                     data_pt = due_date.strftime('%d/%m/%Y')
                     st.success(f"✅ Projeto **{code}** criado com sucesso! Prazo estipulado para: **{data_pt}**.")
                 except Exception as e:
