@@ -4,9 +4,32 @@ import pandas as pd
 from datetime import datetime
 import os
 import sys
+import uuid # Para gerar nomes únicos para os ficheiros
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
+
+# ==========================================
+# FUNÇÃO PARA GUARDAR UPLOADS COM SEGURANÇA
+# ==========================================
+def salvar_arquivo(uploaded_file):
+    if uploaded_file is None:
+        return None
+    
+    upload_dir = "uploads"
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir)
+        
+    # Limpa o nome do ficheiro e adiciona um código único para não haver ficheiros duplicados
+    nome_seguro = uploaded_file.name.replace(" ", "_")
+    nome_unico = f"{uuid.uuid4().hex[:8]}_{nome_seguro}"
+    caminho_completo = os.path.join(upload_dir, nome_unico)
+    
+    # Guarda fisicamente no servidor
+    with open(caminho_completo, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+        
+    return caminho_completo
 
 def obter_badge_status(status):
     cores = {
@@ -31,15 +54,24 @@ def render():
     can_edit = st.session_state.get('can_edit_tasks', False)
 
     # ==========================================
-    # AUTOCURA DA BASE DE DADOS (Cria tabela de atualizações se não existir)
+    # AUTOCURA DA BASE DE DADOS (Atualizado para suportar ficheiros)
     # ==========================================
     conn_init = sqlite3.connect(DB_PATH)
+    # Cria tabela se não existir
     conn_init.execute('''CREATE TABLE IF NOT EXISTS project_updates (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, 
                         project_id INTEGER NOT NULL, 
                         user_id INTEGER NOT NULL, 
                         update_text TEXT, 
                         created_at DATETIME)''')
+    
+    # Adiciona a coluna file_path na tabela de updates se ela ainda não existir
+    cursor = conn_init.cursor()
+    cursor.execute("PRAGMA table_info(project_updates)")
+    colunas_updates = [col[1] for col in cursor.fetchall()]
+    if 'file_path' not in colunas_updates:
+        cursor.execute("ALTER TABLE project_updates ADD COLUMN file_path TEXT")
+        
     conn_init.commit()
     conn_init.close()
 
@@ -94,7 +126,6 @@ def render():
             if user_role == 'admin':
                 if st.button("🗑️ Excluir Projeto", type="secondary", use_container_width=True):
                     conn = sqlite3.connect(DB_PATH)
-                    # Exclusão em cascata atualizada com a nova tabela
                     conn.execute("DELETE FROM project_updates WHERE project_id = ?", (pid,))
                     conn.execute("DELETE FROM task_chats WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)", (pid,))
                     conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
@@ -145,13 +176,11 @@ def render():
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        
-        # ==========================================
-        # AGORA TEMOS 3 ABAS NA SALA DO PROJETO
-        # ==========================================
-        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil", "📢 Atualizações", "📄 Escopo e Documentação"])
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
 
-        # --- ABA 1: KANBAN ---
+        # ==========================================
+        # ABA 1: KANBAN E CHAT (COM ANEXOS)
+        # ==========================================
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
             users_dict = dict(zip(pd.read_sql_query("SELECT id, name FROM users", conn)['id'], pd.read_sql_query("SELECT id, name FROM users", conn)['name']))
@@ -188,42 +217,59 @@ def render():
                             if st.button("💬 Abrir Chat", key=f"chat_{t['id']}", use_container_width=True):
                                 st.session_state[f"show_chat_{t['id']}"] = not st.session_state.get(f"show_chat_{t['id']}", False)
                                 
+                            # ÁREA DO CHAT COM UPLOAD DE FICHEIROS
                             if st.session_state.get(f"show_chat_{t['id']}", False):
                                 st.markdown("---")
-                                chats = pd.read_sql_query("SELECT c.message, u.name FROM task_chats c JOIN users u ON c.user_id = u.id WHERE task_id = ? ORDER BY created_at ASC", conn, params=(t['id'],))
-                                for _, msg in chats.iterrows(): 
-                                    st.markdown(f"<div style='background-color: #EFF6FF; padding: 10px; border-radius: 10px; margin-bottom: 8px; border-left: 4px solid #2563EB;'><span style='font-size: 0.8em; font-weight: bold; color: #2563EB;'>{msg['name']}</span><br><span style='color: #334155; font-size: 0.9em;'>{msg['message']}</span></div>", unsafe_allow_html=True)
+                                chats = pd.read_sql_query("SELECT c.message, c.file_path, u.name FROM task_chats c JOIN users u ON c.user_id = u.id WHERE task_id = ? ORDER BY created_at ASC", conn, params=(t['id'],))
+                                
+                                for chat_idx, msg in chats.iterrows(): 
+                                    st.markdown(f"<div style='background-color: #EFF6FF; padding: 10px; border-radius: 10px; margin-bottom: 4px; border-left: 4px solid #2563EB;'><span style='font-size: 0.8em; font-weight: bold; color: #2563EB;'>{msg['name']}</span><br><span style='color: #334155; font-size: 0.9em;'>{msg['message']}</span></div>", unsafe_allow_html=True)
+                                    
+                                    # Se houver um anexo nesta mensagem, exibe o botão de download
+                                    if msg['file_path'] and os.path.exists(msg['file_path']):
+                                        nome_original = msg['file_path'].split('_', 1)[-1] if '_' in os.path.basename(msg['file_path']) else os.path.basename(msg['file_path'])
+                                        with open(msg['file_path'], "rb") as file:
+                                            st.download_button(label=f"📎 Descarregar: {nome_original}", data=file, file_name=nome_original, key=f"dl_chat_{t['id']}_{chat_idx}")
                                 
                                 with st.form(f"f_chat_{t['id']}", clear_on_submit=True):
-                                    m = st.text_input("Escreva algo...")
-                                    if st.form_submit_button("Enviar"):
-                                        if m:
-                                            conn.execute("INSERT INTO task_chats (task_id, user_id, message) VALUES (?,?,?)", (t['id'], user_id, m))
+                                    m = st.text_input("Escreva a sua mensagem...")
+                                    arquivo_chat = st.file_uploader("📎 Anexar documento (Opcional)", key=f"up_chat_{t['id']}")
+                                    
+                                    if st.form_submit_button("Enviar Mensagem"):
+                                        if m or arquivo_chat:
+                                            caminho_salvo = salvar_arquivo(arquivo_chat)
+                                            conn.execute("INSERT INTO task_chats (task_id, user_id, message, file_path) VALUES (?,?,?,?)", (t['id'], user_id, m, caminho_salvo))
                                             conn.commit(); st.rerun()
             conn.close()
 
-        # --- ABA 2: MURAL DE ATUALIZAÇÕES (NOVO) ---
+        # ==========================================
+        # ABA 2: MURAL DE ATUALIZAÇÕES (COM ANEXOS)
+        # ==========================================
         with tab_updates:
             st.markdown("### 📢 Diário de Bordo do Projeto")
-            st.markdown("<p style='color: #64748B;'>Utilize este espaço para registar conclusões de sprints, atas de reuniões ou comunicados gerais sobre o avanço do projeto.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color: #64748B;'>Registe conclusões de sprints, atas e anexe relatórios importantes.</p>", unsafe_allow_html=True)
             
-            # Formulário para nova atualização
+            # Formulário com Upload
             with st.form(f"form_update_{pid}", clear_on_submit=True):
                 novo_texto = st.text_area("Escreva a sua atualização aqui...")
+                arquivo_update = st.file_uploader("📎 Anexar Ficheiro/Ata (Opcional)", key=f"up_update_{pid}")
+                
                 if st.form_submit_button("Publicar Atualização"):
-                    if novo_texto.strip():
+                    if novo_texto.strip() or arquivo_update:
+                        caminho_salvo = salvar_arquivo(arquivo_update)
                         conn = sqlite3.connect(DB_PATH)
                         agora_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        conn.execute("INSERT INTO project_updates (project_id, user_id, update_text, created_at) VALUES (?,?,?,?)", (pid, user_id, novo_texto, agora_str))
+                        conn.execute("INSERT INTO project_updates (project_id, user_id, update_text, created_at, file_path) VALUES (?,?,?,?,?)", 
+                                     (pid, user_id, novo_texto, agora_str, caminho_salvo))
                         conn.commit(); conn.close()
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Exibir as atualizações como um feed/timeline
+            # Renderizar o feed de atualizações
             conn = sqlite3.connect(DB_PATH)
             df_updates = pd.read_sql_query("""
-                SELECT p.update_text, p.created_at, u.name 
+                SELECT p.update_text, p.created_at, p.file_path, u.name 
                 FROM project_updates p 
                 JOIN users u ON p.user_id = u.id 
                 WHERE p.project_id = ? 
@@ -234,14 +280,20 @@ def render():
             if df_updates.empty:
                 st.info("Nenhuma atualização registada ainda.")
             else:
-                for _, log in df_updates.iterrows():
-                    # Converte a data do banco para o padrão visual DD/MM/YYYY às HH:MM
+                for upd_idx, log in df_updates.iterrows():
                     data_log_pt = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y às %H:%M')
                     
                     with st.container(border=True):
                         st.markdown(f"<span style='color: #2563EB; font-weight: 700; font-size: 1.05em;'>{log['name']}</span> &nbsp;<span style='color: #94A3B8; font-size: 0.85em;'>• {data_log_pt}</span>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-
+                        if log['update_text']:
+                            st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+                        
+                        # Se houver anexo, mostra o botão de download
+                        if log['file_path'] and os.path.exists(log['file_path']):
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            nome_original = log['file_path'].split('_', 1)[-1] if '_' in os.path.basename(log['file_path']) else os.path.basename(log['file_path'])
+                            with open(log['file_path'], "rb") as file:
+                                st.download_button(label=f"📎 Descarregar Anexo: {nome_original}", data=file, file_name=nome_original, key=f"dl_upd_{pid}_{upd_idx}")
 
         # --- ABA 3: DOCUMENTAÇÃO ---
         with tab_doc:
