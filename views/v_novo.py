@@ -45,7 +45,7 @@ def render():
         col3, col4 = st.columns(2)
         due_date = col3.date_input("📅 Prazo Desejado", format="DD/MM/YYYY")
         # NOVO CAMPO: Múltipla escolha para a Equipa!
-        equipa = col4.multiselect("👥 Membros da Equipa (Participantes)", list(users_dict.keys()), format_func=lambda x: users_dict[x])
+        equipa = col4.multiselect("👥 Membros da Equipe", list(users_dict.keys()), format_func=lambda x: users_dict[x])
 
         st.divider()
         st.markdown(f"### Escopo Específico: {tipo}")
