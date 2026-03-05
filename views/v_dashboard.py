@@ -24,22 +24,33 @@ def render():
         st.info("Nenhum projeto cadastrado no momento.")
         return
 
+    # Preparação das Datas
     df_projects['due_date'] = pd.to_datetime(df_projects['due_date'], errors='coerce')
+    
+    # Filtros por Status
     projetos_concluidos = df_projects[df_projects['status'] == 'Concluído']
     projetos_ativos = df_projects[df_projects['status'].isin(['Não Iniciado', 'Em Planejamento', 'Em Execução', 'Aguardando Aprovação'])]
     projetos_bloqueados = df_projects[df_projects['status'] == 'Pausado / Bloqueado']
 
+    # ========================================================
+    # AQUI ESTÁ A CORREÇÃO DA MÉTRICA DE ENTREGA NO PRAZO
+    # ========================================================
     if 'real_end_date' in df_projects.columns and not projetos_concluidos.empty:
         df_projects['real_end_date'] = pd.to_datetime(df_projects['real_end_date'], errors='coerce')
+        # Filtra apenas os concluídos que terminaram antes ou no dia do prazo
         no_prazo = projetos_concluidos[projetos_concluidos['real_end_date'] <= projetos_concluidos['due_date']]
         kpi_prazo_pct = (len(no_prazo) / len(projetos_concluidos)) * 100
     else:
-        kpi_prazo_pct = 100.0
+        # Se a lista de concluídos está vazia, o KPI é 0% (não 100%)
+        kpi_prazo_pct = 0.0
 
     st.markdown("### 🎯 Visão Estratégica")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Projetos Totais", len(df_projects))
-    col2.metric("🏆 % Entregue no Prazo", f"{kpi_prazo_pct:.1f}%")
+    
+    # Adicionei uma dica (help) para explicar que só contabiliza os projetos já concluídos
+    col2.metric("🏆 Entregues no Prazo", f"{kpi_prazo_pct:.1f}%", help="Porcentagem de projetos CONCLUÍDOS que não ultrapassaram a data limite estipulada.")
+    
     col3.metric("⏳ Ativos / Em Execução", len(projetos_ativos))
     col4.metric("🛑 Pausados / Bloqueados", len(projetos_bloqueados))
 
