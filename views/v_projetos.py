@@ -193,7 +193,7 @@ def render():
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil", "📢 Atualizações", "📄 Escopo e Documentação"])
 
         # ==========================================
         # ABA 1: KANBAN E CHAT (COM ANEXOS)
