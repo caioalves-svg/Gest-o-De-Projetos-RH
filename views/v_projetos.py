@@ -4,14 +4,11 @@ import pandas as pd
 from datetime import datetime
 import os
 import sys
-import uuid # Para gerar nomes únicos para os ficheiros
+import uuid
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.setup import DB_PATH
 
-# ==========================================
-# FUNÇÃO PARA GUARDAR UPLOADS COM SEGURANÇA
-# ==========================================
 def salvar_arquivo(uploaded_file):
     if uploaded_file is None:
         return None
@@ -20,12 +17,10 @@ def salvar_arquivo(uploaded_file):
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir)
         
-    # Limpa o nome do ficheiro e adiciona um código único para não haver ficheiros duplicados
     nome_seguro = uploaded_file.name.replace(" ", "_")
     nome_unico = f"{uuid.uuid4().hex[:8]}_{nome_seguro}"
     caminho_completo = os.path.join(upload_dir, nome_unico)
     
-    # Guarda fisicamente no servidor
     with open(caminho_completo, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
@@ -54,10 +49,9 @@ def render():
     can_edit = st.session_state.get('can_edit_tasks', False)
 
     # ==========================================
-    # AUTOCURA DA BASE DE DADOS (Atualizado para suportar ficheiros)
+    # AUTOCURA DA BASE DE DADOS 
     # ==========================================
     conn_init = sqlite3.connect(DB_PATH)
-    # Cria tabela se não existir
     conn_init.execute('''CREATE TABLE IF NOT EXISTS project_updates (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, 
                         project_id INTEGER NOT NULL, 
@@ -65,7 +59,6 @@ def render():
                         update_text TEXT, 
                         created_at DATETIME)''')
     
-    # Adiciona a coluna file_path na tabela de updates se ela ainda não existir
     cursor = conn_init.cursor()
     cursor.execute("PRAGMA table_info(project_updates)")
     colunas_updates = [col[1] for col in cursor.fetchall()]
@@ -138,13 +131,24 @@ def render():
 
         st.divider()
 
+        # ==========================================
+        # GESTÃO DO CABEÇALHO (STATUS, PRAZO E GESTOR)
+        # ==========================================
+        conn = sqlite3.connect(DB_PATH)
+        users_df = pd.read_sql_query("SELECT id, name FROM users", conn)
+        conn.close()
+        users_dict = dict(zip(users_df['id'], users_df['name']))
+
         st_list = ["Não Iniciado", "Em Planejamento", "Em Execução", "Aguardando Aprovação", "Pausado / Bloqueado", "Concluído"]
         if p_data['status'] not in st_list: st_list.append(p_data['status'])
         
-        col_st1, col_prazo, col_vazia = st.columns([4, 4, 2])
+        # Colunas reajustadas para acomodar o Gestor Responsável
+        col_st1, col_prazo, col_gestor = st.columns([3, 3, 4])
         
+        # 1. Status
         novo_status_proj = col_st1.selectbox("Etapa Atual do Projeto:", st_list, index=st_list.index(p_data['status']))
         
+        # 2. Prazo
         try:
             prazo_atual = datetime.strptime(p_data['due_date'], '%Y-%m-%d').date() if p_data.get('due_date') else datetime.today().date()
         except:
@@ -152,38 +156,50 @@ def render():
             
         novo_prazo = col_prazo.date_input("📅 Prazo Desejado (Editável):", value=prazo_atual, format="DD/MM/YYYY")
 
+        # 3. Gestor Responsável (Bloqueado para não admins)
+        if user_role == 'admin':
+            gestor_id_atual = p_data.get('manager_id')
+            idx_gestor = list(users_dict.keys()).index(gestor_id_atual) if gestor_id_atual in users_dict else 0
+            novo_manager_id = col_gestor.selectbox("👤 Gestor Responsável:", list(users_dict.keys()), format_func=lambda x: users_dict[x], index=idx_gestor)
+        else:
+            nome_gestor_atual = users_dict.get(p_data.get('manager_id'), "Desconhecido")
+            col_gestor.text_input("👤 Gestor Responsável:", value=nome_gestor_atual, disabled=True, help="Apenas administradores podem alterar o gestor.")
+            novo_manager_id = p_data.get('manager_id')
+
+        # Validação de Mudanças e Gravação no Banco
         mudou_status = novo_status_proj != p_data['status']
         mudou_prazo = novo_prazo.strftime('%Y-%m-%d') != p_data.get('due_date', '')
+        mudou_manager = novo_manager_id != p_data.get('manager_id')
 
-        if mudou_status or mudou_prazo:
+        if mudou_status or mudou_prazo or mudou_manager:
             conn = sqlite3.connect(DB_PATH)
             hoje_iso = datetime.now().strftime('%Y-%m-%d')
             prazo_str = novo_prazo.strftime('%Y-%m-%d')
             
             if mudou_status and novo_status_proj == "Em Planejamento":
-                conn.execute("UPDATE projects SET status = ?, due_date = ?, start_date = ? WHERE id = ?", 
-                             (novo_status_proj, prazo_str, hoje_iso, pid))
+                conn.execute("UPDATE projects SET status = ?, due_date = ?, manager_id = ?, start_date = ? WHERE id = ?", 
+                             (novo_status_proj, prazo_str, novo_manager_id, hoje_iso, pid))
                 st.session_state['selected_project_data']['start_date'] = hoje_iso
                 hoje_pt = datetime.now().strftime('%d/%m/%Y')
                 st.toast(f"🚀 Automação: Data de Início registrada como {hoje_pt}!", icon="✅")
             else:
-                conn.execute("UPDATE projects SET status = ?, due_date = ? WHERE id = ?", 
-                             (novo_status_proj, prazo_str, pid))
+                conn.execute("UPDATE projects SET status = ?, due_date = ?, manager_id = ? WHERE id = ?", 
+                             (novo_status_proj, prazo_str, novo_manager_id, pid))
                 
             conn.commit(); conn.close()
             st.session_state['selected_project_data']['status'] = novo_status_proj
             st.session_state['selected_project_data']['due_date'] = prazo_str
+            st.session_state['selected_project_data']['manager_id'] = novo_manager_id
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil", "📢 Atualizações", "📄 Escopo e Documentação"])
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
 
         # ==========================================
         # ABA 1: KANBAN E CHAT (COM ANEXOS)
         # ==========================================
         with tab_kanban:
             conn = sqlite3.connect(DB_PATH)
-            users_dict = dict(zip(pd.read_sql_query("SELECT id, name FROM users", conn)['id'], pd.read_sql_query("SELECT id, name FROM users", conn)['name']))
             
             if user_role == 'admin' or can_edit:
                 with st.expander("➕ Criar Nova Tarefa para a Equipa"):
@@ -217,7 +233,6 @@ def render():
                             if st.button("💬 Abrir Chat", key=f"chat_{t['id']}", use_container_width=True):
                                 st.session_state[f"show_chat_{t['id']}"] = not st.session_state.get(f"show_chat_{t['id']}", False)
                                 
-                            # ÁREA DO CHAT COM UPLOAD DE FICHEIROS
                             if st.session_state.get(f"show_chat_{t['id']}", False):
                                 st.markdown("---")
                                 chats = pd.read_sql_query("SELECT c.message, c.file_path, u.name FROM task_chats c JOIN users u ON c.user_id = u.id WHERE task_id = ? ORDER BY created_at ASC", conn, params=(t['id'],))
@@ -225,7 +240,6 @@ def render():
                                 for chat_idx, msg in chats.iterrows(): 
                                     st.markdown(f"<div style='background-color: #EFF6FF; padding: 10px; border-radius: 10px; margin-bottom: 4px; border-left: 4px solid #2563EB;'><span style='font-size: 0.8em; font-weight: bold; color: #2563EB;'>{msg['name']}</span><br><span style='color: #334155; font-size: 0.9em;'>{msg['message']}</span></div>", unsafe_allow_html=True)
                                     
-                                    # Se houver um anexo nesta mensagem, exibe o botão de download
                                     if msg['file_path'] and os.path.exists(msg['file_path']):
                                         nome_original = msg['file_path'].split('_', 1)[-1] if '_' in os.path.basename(msg['file_path']) else os.path.basename(msg['file_path'])
                                         with open(msg['file_path'], "rb") as file:
@@ -243,13 +257,12 @@ def render():
             conn.close()
 
         # ==========================================
-        # ABA 2: MURAL DE ATUALIZAÇÕES (COM ANEXOS)
+        # ABA 2: MURAL DE ATUALIZAÇÕES
         # ==========================================
         with tab_updates:
             st.markdown("### 📢 Diário de Bordo do Projeto")
             st.markdown("<p style='color: #64748B;'>Registe conclusões de sprints, atas e anexe relatórios importantes.</p>", unsafe_allow_html=True)
             
-            # Formulário com Upload
             with st.form(f"form_update_{pid}", clear_on_submit=True):
                 novo_texto = st.text_area("Escreva a sua atualização aqui...")
                 arquivo_update = st.file_uploader("📎 Anexar Ficheiro/Ata (Opcional)", key=f"up_update_{pid}")
@@ -266,7 +279,6 @@ def render():
 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Renderizar o feed de atualizações
             conn = sqlite3.connect(DB_PATH)
             df_updates = pd.read_sql_query("""
                 SELECT p.update_text, p.created_at, p.file_path, u.name 
@@ -288,7 +300,6 @@ def render():
                         if log['update_text']:
                             st.markdown(f"<div style='color: #334155; margin-top: 8px; line-height: 1.5;'>{log['update_text'].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
                         
-                        # Se houver anexo, mostra o botão de download
                         if log['file_path'] and os.path.exists(log['file_path']):
                             st.markdown("<br>", unsafe_allow_html=True)
                             nome_original = log['file_path'].split('_', 1)[-1] if '_' in os.path.basename(log['file_path']) else os.path.basename(log['file_path'])
