@@ -149,7 +149,7 @@ def render():
         # ==========================================
         # AGORA TEMOS 3 ABAS NA SALA DO PROJETO
         # ==========================================
-        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil (Kanban)", "📢 Atualizações (Log/Sprint)", "📄 Escopo e Documentação"])
+        tab_kanban, tab_updates, tab_doc = st.tabs(["🗂️ Gestão Ágil", "📢 Atualizações", "📄 Escopo e Documentação"])
 
         # --- ABA 1: KANBAN ---
         with tab_kanban:
