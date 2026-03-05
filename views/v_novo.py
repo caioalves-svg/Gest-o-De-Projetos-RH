@@ -22,20 +22,22 @@ def render():
     conn.close()
     users_dict = dict(zip(users_df['id'], users_df['name']))
 
+    # 1. A MÁGICA ESTÁ AQUI: O selectbox fica FORA do formulário para a tela reagir na hora!
+    col_tipo, col_vazia = st.columns([1, 2])
+    tipo = col_tipo.selectbox("Tipo de Iniciativa", ["Melhoria", "Implantação"])
+
+    # 2. AGORA SIM, ABRIMOS O FORMULÁRIO
     with st.form("form_novo_proj", clear_on_submit=True):
-        # 1. DADOS BÁSICOS (Simplificados)
         col1, col2 = st.columns(2)
         nome = col1.text_input("Nome do Projeto*")
-        tipo = col2.selectbox("Tipo de Iniciativa", ["Melhoria", "Implantação"])
+        manager = col2.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
         
-        col3, col4 = st.columns(2)
-        manager = col3.selectbox("Gestor Responsável", list(users_dict.keys()), format_func=lambda x: users_dict[x])
-        due_date = col4.date_input("Prazo Desejado")
+        due_date = st.date_input("Prazo Desejado")
 
         st.divider()
         st.markdown(f"### Escopo Específico: {tipo}")
         
-        # 2. CAMPOS CONDICIONAIS COM BASE NO TIPO
+        # 3. CAMPOS CONDICIONAIS COM BASE NO TIPO (Agora atualizam instantaneamente)
         if tipo == "Melhoria":
             as_is = st.text_area(
                 "AS-IS (Situação Atual)*", 
@@ -61,9 +63,8 @@ def render():
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 3. VALIDAÇÃO E SUBMISSÃO
+        # 4. VALIDAÇÃO E SUBMISSÃO
         if st.form_submit_button("🚀 Lançar Projeto no Portfólio"):
-            # Validação de campos obrigatórios conforme o tipo
             valido = False
             if not nome:
                 st.error("⚠️ O Nome do Projeto é obrigatório.")
@@ -80,17 +81,14 @@ def render():
                 cur.execute("SELECT COUNT(*) FROM projects")
                 code = f"HR-{cur.fetchone()[0] + 1:03d}"
                 
-                # Inserimos os dados na tabela principal. Requester e Sponsor vão como vazios ("")
                 cur.execute("""INSERT INTO projects (code, name, requester, sponsor, manager_id, type, due_date, status, start_date) 
                                VALUES (?,?,?,?,?,?,?,?,?)""", 
                             (code, nome, "", "", manager, tipo, due_date, 'Não Iniciado', datetime.now().strftime('%Y-%m-%d')))
                 proj_id = cur.lastrowid
                 
-                # Inserimos os detalhes baseados no tipo
                 if tipo == "Melhoria":
                     cur.execute("INSERT INTO project_melhoria (project_id, as_is, to_be) VALUES (?,?,?)", (proj_id, as_is, to_be))
                 else:
-                    # Guardamos os benefícios na coluna 'risk' existente para não precisar recriar o banco de dados
                     cur.execute("INSERT INTO project_implantacao (project_id, justification, risk) VALUES (?,?,?)", (proj_id, justificativa, beneficios))
                 
                 conn.commit()
