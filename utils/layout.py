@@ -3,11 +3,11 @@ import streamlit as st
 def aplicar_css_seguro():
     st.markdown("""
         <style>
-            /* 1. LIMPEZA TOTAL DA INTERFACE NATIVA */
+            /* LIMPEZA TOTAL DA INTERFACE NATIVA */
             [data-testid="stSidebarNav"], footer, [data-testid="stToolbar"] { display: none !important; }
             header[data-testid="stHeader"] { background-color: transparent !important; }
             
-            /* A Setinha do Menu (Sempre visível e elegante) */
+            /* A Setinha do Menu */
             button[kind="header"] {
                 color: #FFFFFF !important; background-color: #2563EB !important;
                 border-radius: 8px !important; margin: 12px !important;
@@ -15,14 +15,14 @@ def aplicar_css_seguro():
             }
             button[kind="header"] svg { fill: #FFFFFF !important; }
 
-            /* 2. FUNDO E SCROLLBAR CUSTOMIZADA */
+            /* FUNDO E SCROLLBAR CUSTOMIZADA */
             .stApp { background-color: #F8FAFC; }
             ::-webkit-scrollbar { width: 8px; height: 8px; }
             ::-webkit-scrollbar-track { background: transparent; }
             ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
             ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-            /* 3. MENU LATERAL (SIDEBAR) ESTILO MAC OS */
+            /* MENU LATERAL (SIDEBAR) ESTILO MAC OS */
             section[data-testid="stSidebar"] {
                 background-color: rgba(255, 255, 255, 0.95) !important;
                 backdrop-filter: blur(10px) !important;
@@ -52,7 +52,7 @@ def aplicar_css_seguro():
                 transform: translateY(-2px); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4) !important;
             }
 
-            /* 4. CARTÕES FLUTUANTES E INPUTS */
+            /* CARTÕES FLUTUANTES E INPUTS */
             [data-testid="stVerticalBlockBorderWrapper"], .stForm {
                 background-color: #FFFFFF !important; border: 1px solid #E2E8F0 !important;
                 border-radius: 16px !important; padding: 10px !important;
@@ -73,7 +73,7 @@ def aplicar_css_seguro():
                 border-color: #3B82F6 !important; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
             }
 
-            /* 5. ANIMAÇÃO DE ENTRADA SUAVE */
+            /* ANIMAÇÃO DE ENTRADA SUAVE */
             .block-container { animation: fadeSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
             @keyframes fadeSlideUp {
                 0% { opacity: 0; transform: translateY(20px); }
@@ -108,6 +108,13 @@ def renderizar_menu_lateral():
                 st.rerun()
 
         st.divider()
+        
+        # ==========================================
+        # BOTÃO GLOBAL DE ATUALIZAR O SISTEMA
+        # ==========================================
+        if st.button("🔄 Atualizar Página"):
+            st.rerun()  # Isto recarrega todos os dados da base de dados instantaneamente sem matar a sessão
+            
         if st.button("🚪 Encerrar Sessão"):
             st.session_state.clear()
             st.rerun()
